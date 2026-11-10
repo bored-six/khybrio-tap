@@ -1,8 +1,13 @@
 import { KINDS } from './kinds.js'
 import { parseHex, contrastRatio } from './color.js'
+import { migrateRaw } from './migrate.js'
+import { parseVideo, embedSrc } from './embed.js'
 
-const ALLOWED = ['slug', 'name', 'tagline', 'look', 'theme', 'font', 'logo', 'cover', 'links', 'branches', 'credit']
-const RESERVED = ['assets', 'fonts', '404', 'index']
+export const LIMITS = { blocks: 30, links: 20, videos: 3, socials: 2, socialItems: 8, heading: 60, text: 280, label: 40 }
+const BLOCK_TYPES = ['link', 'heading', 'text', 'socials', 'video']
+const BLOCK_KEYS = { link: ['type', 'kind', 'url', 'label'], heading: ['type', 'text'], text: ['type', 'text'], socials: ['type', 'items'], video: ['type', 'url'] }
+const ALLOWED = ['slug', 'name', 'tagline', 'look', 'theme', 'font', 'logo', 'cover', 'blocks', 'branches', 'credit']
+const RESERVED = ['assets', 'fonts', '404', 'index', 'api', 'media']
 export const FILE_RE = /^[a-z0-9][a-z0-9._-]*\.(svg|png|jpe?g|webp)$/i
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 const isStr = (v) => typeof v === 'string'
@@ -26,13 +31,15 @@ export function validateSite(raw) {
   return { ok: errors.length === 0, site: errors.length ? null : { origin, base: s.base, mainSite: s.mainSite }, errors }
 }
 
-export function validateClient(raw, { folder, looks = [], fonts = [], files = [] } = {}) {
+export function validateClient(input, { folder, looks = [], fonts = [], bodyFonts = fonts, files = [] } = {}) {
   const errors = []
+  const warnings = []
   const err = (m) => errors.push(m)
-  if (!isObj(raw)) return { ok: false, client: null, errors: ['client: must be an object'] }
+  if (!isObj(input)) return { ok: false, client: null, errors: ['client: must be an object'], warnings }
+  const raw = migrateRaw(input)
 
-  for (const k of Object.keys(raw)) if (!ALLOWED.includes(k)) err(`${k}: unknown key (allowed: ${ALLOWED.join(', ')})`)
-
+  for (const k of Object.keys(raw)) if (k !== 'links' && !ALLOWED.includes(k)) err(`${k}: unknown key (allowed: ${ALLOWED.join(', ')})`)
+  if (raw.links !== undefined) err('links: v1 key, use blocks')
   // slug
   const slug = raw.slug
   if (!isStr(slug) || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) || slug.length < 2 || slug.length > 40) {
@@ -63,7 +70,7 @@ export function validateClient(raw, { folder, looks = [], fonts = [], files = []
     }
     if (theme.bg && theme.ink) {
       const r = contrastRatio(theme.ink, theme.bg)
-      if (r < 4.5) err(`theme.ink: contrast against bg is ${r.toFixed(2)}:1, needs at least 4.5:1`)
+      if (r < 4.5) warnings.push(`theme.ink: contrast against bg is ${r.toFixed(2)}:1, 4.5:1 recommended for body text`)
     }
     if (theme.accent && theme.ink && theme.bg) {
       const ci = contrastRatio(theme.ink, theme.accent)
@@ -71,21 +78,29 @@ export function validateClient(raw, { folder, looks = [], fonts = [], files = []
       const useInk = ci >= cb
       theme.onAccent = useInk ? theme.ink : theme.bg
       const best = useInk ? ci : cb
-      if (best < 3) err(`theme.accent: best text contrast on accent is ${best.toFixed(2)}:1, needs at least 3:1`)
+      if (best < 3) warnings.push(`theme.accent: best text contrast on accent is ${best.toFixed(2)}:1, 3:1 recommended for button text`)
+      const ab = contrastRatio(theme.accent, theme.bg)
+      if (ab < 3) warnings.push(`theme.accent: accent against bg is ${ab.toFixed(2)}:1, 3:1 recommended so buttons stand out`)
     }
   }
 
   // fonts
-  const font = { display: 'fraunces', body: 'inter' }
+  const font = { heading: 'fraunces', tagline: null, body: 'inter' }
   if (raw.font !== undefined) {
     if (!isObj(raw.font)) err('font: must be an object')
-    else
-      for (const k of ['display', 'body']) {
+    else {
+      for (const k of Object.keys(raw.font)) {
+        if (k === 'display') err('font.display: v1 key, use font.heading')
+        else if (!['heading', 'tagline', 'body'].includes(k)) err(`font.${k}: unknown key`)
+      }
+      for (const [k, list] of [['heading', fonts], ['body', bodyFonts], ['tagline', fonts]]) {
         if (raw.font[k] === undefined) continue
-        if (!isStr(raw.font[k]) || !fonts.includes(raw.font[k])) err(`font.${k}: must be one of ${fonts.join(', ')}`)
+        if (!isStr(raw.font[k]) || !list.includes(raw.font[k])) err(`font.${k}: must be one of ${list.join(', ')}`)
         else font[k] = raw.font[k]
       }
+    }
   }
+  if (font.tagline === null) font.tagline = font.body
 
   // logo, cover
   const fileField = (key) => {
@@ -104,28 +119,70 @@ export function validateClient(raw, { folder, looks = [], fonts = [], files = []
   const logo = fileField('logo')
   const cover = fileField('cover')
 
-  // links
-  const links = []
-  if (!Array.isArray(raw.links) || raw.links.length < 1 || raw.links.length > 12) err('links: need 1 to 12 items')
-  else
-    raw.links.forEach((l, i) => {
-      const p = `links[${i}]`
-      if (!isObj(l)) return err(`${p}: must be an object`)
-      const def = isStr(l.kind) && Object.hasOwn(KINDS, l.kind) ? KINDS[l.kind] : null
-      if (!def) err(`${p}.kind: must be one of ${Object.keys(KINDS).join(', ')}`)
-      if (!isStr(l.url)) err(`${p}.url: required string`)
-      else if (/[\s\u0000-\u001f\u007f]/.test(l.url)) err(`${p}.url: must not contain whitespace or control characters`)
-      else if (def) {
-        const proto = protocolOf(l.url)
-        if (proto !== def.scheme) err(`${p}.url: must be a valid ${def.scheme} URL for kind "${l.kind}"`)
+  // blocks
+  const blocks = []
+  const count = { link: 0, video: 0, socials: 0 }
+  const checkUrl = (p, kind, url) => {
+    if (!isStr(url)) return err(`${p}.url: required string`)
+    if (/[\s\u0000-\u001f\u007f]/.test(url)) return err(`${p}.url: must not contain whitespace or control characters`)
+    if (protocolOf(url) !== KINDS[kind].scheme) err(`${p}.url: must be a valid ${KINDS[kind].scheme} URL for kind "${kind}"`)
+  }
+  const kindOf = (v) => (isStr(v) && Object.hasOwn(KINDS, v) ? v : null)
+  if (!Array.isArray(raw.blocks) || raw.blocks.length < 1 || raw.blocks.length > LIMITS.blocks) err(`blocks: need 1 to ${LIMITS.blocks} items`)
+  if (Array.isArray(raw.blocks)) {
+    raw.blocks.forEach((b, i) => {
+      const p = `blocks[${i}]`
+      if (!isObj(b)) return err(`${p}: must be an object`)
+      if (!isStr(b.type) || !BLOCK_TYPES.includes(b.type)) return err(`${p}.type: must be one of ${BLOCK_TYPES.join(', ')}`)
+      count[b.type] !== undefined && count[b.type]++
+      for (const k of Object.keys(b)) if (!BLOCK_KEYS[b.type].includes(k)) err(`${p}.${k}: unknown key`)
+
+      if (b.type === 'link') {
+        const kind = kindOf(b.kind)
+        if (!kind) err(`${p}.kind: must be one of ${Object.keys(KINDS).join(', ')}`)
+        else checkUrl(p, kind, b.url)
+        if (!kind && !isStr(b.url)) err(`${p}.url: required string`)
+        let label = kind ? KINDS[kind].label : ''
+        if (b.label !== undefined) {
+          if (!isStr(b.label) || !b.label.trim() || b.label.length > LIMITS.label) err(`${p}.label: must be 1-${LIMITS.label} characters`)
+          else label = b.label
+        } else if (kind === 'custom') err(`${p}.label: required for kind "custom"`)
+        if (kind) blocks.push({ type: 'link', kind, url: b.url, label, primary: false })
+      } else if (b.type === 'heading') {
+        const t = isStr(b.text) ? b.text.trim() : ''
+        if (!t || t.length > LIMITS.heading || /[\r\n]/.test(t)) err(`${p}.text: must be 1-${LIMITS.heading} characters on one line`)
+        else blocks.push({ type: 'heading', text: t })
+      } else if (b.type === 'text') {
+        const t = isStr(b.text) ? b.text.replace(/\r\n?/g, '\n').trim() : ''
+        if (!t || t.length > LIMITS.text || (t.match(/\n/g) || []).length > 4) err(`${p}.text: must be 1-${LIMITS.text} characters with at most 4 line breaks`)
+        else blocks.push({ type: 'text', text: t })
+      } else if (b.type === 'socials') {
+        if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > LIMITS.socialItems) return err(`${p}.items: need 1 to ${LIMITS.socialItems} items`)
+        const items = []
+        b.items.forEach((it, j) => {
+          const q = `${p}.items[${j}]`
+          if (!isObj(it)) return err(`${q}: must be an object`)
+          for (const k of Object.keys(it)) if (k !== 'kind' && k !== 'url') err(`${q}.${k}: unknown key`)
+          const kind = kindOf(it.kind)
+          if (!kind || !KINDS[kind].social) return err(`${q}.kind: must be one of ${Object.keys(KINDS).filter((x) => KINDS[x].social).join(', ')}`)
+          const before = errors.length
+          checkUrl(q, kind, it.url)
+          if (errors.length === before) items.push({ kind, url: it.url, label: KINDS[kind].label })
+        })
+        if (items.length === b.items.length) blocks.push({ type: 'socials', items })
+      } else {
+        const v = isStr(b.url) ? parseVideo(b.url) : null
+        if (!v) err(`${p}.url: required string`)
+        else if (v.error) err(`${p}.url: ${v.error}`)
+        else blocks.push({ type: 'video', url: b.url, provider: v.provider, id: v.id, vertical: v.vertical, src: embedSrc(v.provider, v.id) })
       }
-      let label = def ? def.label : ''
-      if (l.label !== undefined) {
-        if (!isStr(l.label) || !l.label.trim() || l.label.length > 40) err(`${p}.label: must be 1-40 characters`)
-        else label = l.label
-      }
-      if (def) links.push({ kind: l.kind, url: l.url, label })
     })
+    if (count.link > LIMITS.links) err(`blocks: at most ${LIMITS.links} link blocks`)
+    if (count.video > LIMITS.videos) err(`blocks: at most ${LIMITS.videos} video blocks`)
+    if (count.socials > LIMITS.socials) err(`blocks: at most ${LIMITS.socials} socials blocks`)
+    const first = blocks.find((b) => b.type === 'link')
+    if (first) first.primary = true
+  }
 
   // branches
   const branches = []
@@ -157,6 +214,6 @@ export function validateClient(raw, { folder, looks = [], fonts = [], files = []
     else credit = raw.credit
   }
 
-  if (errors.length) return { ok: false, client: null, errors }
-  return { ok: true, client: { slug, name, tagline, look: raw.look, theme, font, logo, cover, links, branches, credit }, errors }
+  if (errors.length) return { ok: false, client: null, errors, warnings }
+  return { ok: true, client: { slug, name, tagline, look: raw.look, theme, font, logo, cover, blocks, branches, credit }, errors, warnings }
 }
