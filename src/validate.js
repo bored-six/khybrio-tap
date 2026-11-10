@@ -3,7 +3,7 @@ import { parseHex, contrastRatio } from './color.js'
 
 const ALLOWED = ['slug', 'name', 'tagline', 'look', 'theme', 'font', 'logo', 'cover', 'links', 'branches', 'credit']
 const RESERVED = ['assets', 'fonts', '404', 'index']
-const FILE_RE = /^[a-z0-9][a-z0-9._-]*\.(svg|png|jpe?g|webp)$/i
+export const FILE_RE = /^[a-z0-9][a-z0-9._-]*\.(svg|png|jpe?g|webp)$/i
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 const isStr = (v) => typeof v === 'string'
 

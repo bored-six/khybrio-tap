@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { validateClient, validateSite } from './validate.js'
 import { renderPage, render404 } from './render.js'
 import { esc } from './html.js'
+import { svgProblem } from './assets.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -45,9 +46,8 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
       const f = raw && raw[key]
       if (typeof f === 'string' && f.toLowerCase().endsWith('.svg') && files.includes(f)) {
         const text = await readFile(join(dir, f), 'utf8')
-        if (/<script/i.test(text) || /\son[a-z]+\s*=/i.test(text) || /foreignObject/i.test(text)) {
-          errors.push(`${key}: SVG must not contain <script>, on* event attributes or foreignObject`)
-        }
+        const problem = svgProblem(text)
+        if (problem) errors.push(`${key}: ${problem}`)
       }
     }
     if (errors.length === 0 && res.ok) clients.push({ folder, dir, client: res.client })
