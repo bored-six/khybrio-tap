@@ -1,6 +1,7 @@
 import { esc } from './html.js'
 import { icon as defaultIcon } from './icons.js'
 import { videoEmbed } from './embed.js'
+import { STYLE, STYLE_KEYS } from './style.js'
 
 function fontFaces(fonts, ids, base) {
   const seen = new Set()
@@ -37,6 +38,55 @@ function head({ title, description, canonical, image, themeColor, css }) {
   )
 }
 
+// Style custom properties: look defaults, then the client's non-null keys, in STYLE_KEYS order.
+function styleDecls(client, look) {
+  const defaults = look.styleDefaults || {}
+  const set = client.style || {}
+  const video = client.background && client.background.type === 'video'
+  let out = ''
+  for (const key of STYLE_KEYS) {
+    const value = set[key] ?? defaults[key] ?? null
+    let decl = value && STYLE[key][value]
+    if (!decl) continue
+    // A backdrop-filter re-blurs every video frame under every button; a firmer bg tint instead.
+    if (video && key === 'buttonFill' && value === 'glass') decl = decl.replace('blur(12px) saturate(1.3)', 'none').replace('var(--bg) 60%', 'var(--bg) 72%')
+    out += ';' + decl
+  }
+  return out
+}
+
+const stopCss = (s) => (s.ref ? `var(--${s.ref})` : s.hex)
+
+function backdrop(bg, asset) {
+  if (!bg || bg.type === 'color' || !bg.type) return { html: '', css: '', type: null }
+  const layer = (inner) => `<div class="kb" aria-hidden="true">${inner}</div>`
+  let css = 'html[data-bg]{background:var(--bg)}html[data-bg] body{background:transparent}' +
+    '.kb{position:fixed;left:0;top:0;width:100%;height:100vh;height:100lvh;z-index:-1;overflow:hidden;pointer-events:none}'
+  if (bg.type === 'gradient') {
+    const stops = bg.stops.map(stopCss).join(',')
+    css += `.kb{background:${bg.shape === 'radial' ? `radial-gradient(130% 90% at 50% 0%,${stops})` : `linear-gradient(${bg.angle ?? 180}deg,${stops})`}}`
+    return { html: layer(''), css, type: 'gradient' }
+  }
+  const [x, y] = bg.focus || [50, 50]
+  css += `.kb-m{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:${x}% ${y}%}`
+  if (bg.blur > 0) css += `.kb-m{filter:blur(${bg.blur}px);transform:scale(1.12)}`
+  css += `.kb::after{content:"";position:absolute;inset:0;background:var(--bg);opacity:${(bg.dim ?? 40) / 100}}`
+  if (bg.type === 'image') {
+    return { html: layer(`<img class="kb-m" src="${esc(asset(bg.file))}" alt="" decoding="async">`), css, type: 'image' }
+  }
+  css += '@media (prefers-reduced-motion:reduce){.kb-v{display:none}}'
+  const poster = esc(asset(bg.poster))
+  return {
+    html: layer(
+      `<img class="kb-m" src="${poster}" alt="" decoding="async">` +
+        `<video class="kb-m kb-v" autoplay muted loop playsinline disablepictureinpicture disableremoteplayback tabindex="-1" poster="${poster}">` +
+        `<source src="${esc(asset(bg.file))}" type="video/mp4" media="(prefers-reduced-motion: no-preference)"></video>`,
+    ),
+    css,
+    type: 'video',
+  }
+}
+
 export function renderPage(client, site, { looks, fonts, icon: iconFn = defaultIcon } = {}) {
   const { base, origin } = site
   const pageUrl = `${origin}${base}${client.slug}/`
@@ -60,8 +110,9 @@ export function renderPage(client, site, { looks, fonts, icon: iconFn = defaultI
   const root =
     `:root{--bg:${t.bg};--ink:${t.ink};--accent:${t.accent};--on-accent:${t.onAccent};` +
     `--font-heading:${stack(fonts[heading])};--font-tagline:${stack(fonts[tagline])};--font-body:${stack(fonts[body])};` +
-    `--heading-weight:${fonts[heading].headingWeight}}`
-  const css = root + fontFaces(fonts, [heading, tagline, body], base) + look.css(ctx)
+    `--heading-weight:${fonts[heading].headingWeight}${styleDecls(client, look)}}`
+  const bd = backdrop(client.background, asset)
+  const css = root + fontFaces(fonts, [heading, tagline, body], base) + look.css(ctx) + bd.css
   const bodyHtml = look.render(ctx)
   const sprite = () =>
     used.size
@@ -71,9 +122,10 @@ export function renderPage(client, site, { looks, fonts, icon: iconFn = defaultI
           .join('') +
         `</svg>`
       : ''
-  const cover = client.cover || client.logo
+  const bgImage = client.background && (client.background.type === 'image' ? client.background.file : client.background.type === 'video' ? client.background.poster : null)
+  const cover = client.cover || client.logo || bgImage
   return (
-    `<!doctype html><html lang="en">` +
+    `<!doctype html><html lang="en"${bd.type ? ` data-bg="${bd.type}"` : ''}>` +
     head({
       title: client.name,
       description: client.tagline || `${client.name}: links, location and contact`,
@@ -82,7 +134,7 @@ export function renderPage(client, site, { looks, fonts, icon: iconFn = defaultI
       themeColor: t.bg,
       css,
     }) +
-    `<body>${bodyHtml}${sprite()}</body></html>`
+    `<body>${bd.html}${bodyHtml}${sprite()}</body></html>`
   )
 }
 
