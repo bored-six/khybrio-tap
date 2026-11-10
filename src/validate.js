@@ -21,7 +21,7 @@ export function validateSite(raw) {
   const s = isObj(raw) ? raw : {}
   const origin = s.origin
   if (!isStr(origin) || !/^https:\/\/[^/\s]+$/.test(origin)) errors.push('origin: must be an https:// URL with no path and no trailing slash')
-  if (!isStr(s.base) || !s.base.startsWith('/') || !s.base.endsWith('/')) errors.push('base: must start and end with "/"')
+  if (!isStr(s.base) || !/^\/([A-Za-z0-9._~-]+\/)*$/.test(s.base)) errors.push('base: must start and end with "/" and contain only letters, digits, . _ ~ -')
   if (protocolOf(s.mainSite) !== 'https:') errors.push('mainSite: must be an https:// URL')
   return { ok: errors.length === 0, site: errors.length ? null : { origin, base: s.base, mainSite: s.mainSite }, errors }
 }

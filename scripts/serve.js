@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
-import { join, extname, dirname, resolve, normalize } from 'node:path'
+import { join, extname, dirname, resolve, normalize, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from '../src/build.js'
 
@@ -18,7 +18,13 @@ const TYPES = {
   '.woff2': 'font/woff2',
 }
 
-async function rebuild() {
+let inflight = null
+function rebuild() {
+  if (!inflight) inflight = doRebuild().finally(() => { inflight = null })
+  return inflight
+}
+
+async function doRebuild() {
   const site = (await import(`${pathToFileURL(join(root, 'site.config.js')).href}?v=${Date.now()}`)).default
   await build({ root, outDir: dist, site })
   return site
@@ -44,8 +50,8 @@ createServer(async (req, res) => {
       let rel = decodeURIComponent(pathname.slice(site.base.length))
       if (rel === '' || rel.endsWith('/')) rel += 'index.html'
       const full = normalize(join(dist, rel))
-      if (full.startsWith(dist) && (await isFile(full))) file = full
-      else if (full.startsWith(dist) && (await isFile(join(full, 'index.html')))) {
+      if ((full === dist || full.startsWith(dist + sep)) && (await isFile(full))) file = full
+      else if ((full === dist || full.startsWith(dist + sep)) && (await isFile(join(full, 'index.html')))) {
         res.writeHead(301, { location: pathname + '/' })
         return res.end()
       }
@@ -58,4 +64,4 @@ createServer(async (req, res) => {
     if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
     res.end(String(e.message))
   }
-}).listen(port, () => console.log(`http://localhost:${port}/`))
+}).listen(port, '127.0.0.1', () => console.log(`http://127.0.0.1:${port}/`))
