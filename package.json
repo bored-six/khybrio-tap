@@ -7,7 +7,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "build": "node src/build.js",
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.js\"",
     "dev": "node scripts/serve.js"
   },
   "devDependencies": {
