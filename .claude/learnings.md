@@ -9,6 +9,17 @@ GitHub Pages cannot route `/slug` to one app, so every client is a real `slug/in
 A project repo with a custom domain forwards its old github.io URLs, which is why the main
 Khybrio site stays in `bored-six/Khybrio` (old cards point there).
 
+## 2026-11-10 - Hosting v2
+- R2 over KV and Static Assets: KV is eventually consistent (up to 60 s) with 1k free writes/day, so "live in 1-2 s"
+  is not guaranteed. Static Assets needs a full wrangler deploy per publish (10-20 s). R2 is strongly consistent and a
+  publish is a few PUTs of changed files. The same bucket later holds images/mp4 under `media/`, which sync never deletes.
+- Renames answer 302 + `no-store`, not 301. A browser-cached 301 A->B plus a later rename back B->A makes phones loop
+  forever; a 302 cannot be cached that way. The redirect record itself is permanent. Tap pages need no SEO juice.
+- Mass-delete guard: sync refuses to delete more than `max(3, half)` of live pages (or to run on an empty `dist/`)
+  unless `force:true`, so one bad build or a wrong folder cannot wipe the live site.
+- The repo is public and `.env.local` now holds Cloudflare keys: `.env*` and `.wrangler/` are git-ignored, and a test
+  asserts `git check-ignore -q .env.local`.
+
 ## 2026-11-10 - Build and dev server
 - Builds go to a temp dir and swap in only on success. Never `rm` outDir before rendering finishes.
 - The dev server rebuilds per request; concurrent requests must share one in-flight build or
