@@ -161,3 +161,46 @@ A look must output each link exactly as the page rules say (href, data-kind, dat
 - SVG logo/cover: rejected (error on `logo` / `cover`) if it contains `<script`, an `on*=` attribute
   (any case, optional spaces before `=`), or `foreignObject`.
 - Dev server: concurrent requests share one in-flight rebuild; binds 127.0.0.1.
+
+## Studio (local dashboard, v1, no login)
+
+`npm run studio` -> `node scripts/studio.js` -> listens on 127.0.0.1, PORT env or 4322, prints the URL.
+Login comes later (Supabase); until then the studio only ever runs on the owner's Mac.
+
+### Module
+`src/studio/server.js` exports `createStudio({ root, site, publish })` -> an `http.Server` (not listening).
+- `root`: repo root (contains `clients/`). `site`: validated site config.
+- `publish`: `async ({ root }) -> { ok, output }`. Default: build into a temp dir to validate everything,
+  then `git add clients`, `git commit -m "content: update tap pages"` (skip if nothing staged), `git push`.
+- Shared SVG check lives in `src/assets.js` as `svgProblem(text) -> string | null`; build.js uses it too.
+
+### Security (every /api/* route)
+- Request must carry header `x-khybrio-studio: 1`, else 403.
+- If an `Origin` header is present it must be `http://localhost:{port}` or `http://127.0.0.1:{port}`, else 403.
+- `:slug` in any route must match the slug regex; anything else -> 400. No path is ever built from
+  unchecked input.
+- JSON bodies over 256 KB -> 413.
+
+### Routes
+| Method + path | Result |
+|---|---|
+| `GET /` and `/studio/*` static | the dashboard app from `studio/` (index.html, studio.css, studio.js) |
+| `GET /api/state` | `{ site, looks:[{id,label}], fonts:[{id,family}], kinds:[{id,label,scheme}], clients:[...], pending:[slug] }` |
+| `GET /api/clients/:slug` | `{ data, files }` raw object from client.js + regular file names in the folder; 404 if missing |
+| `POST /api/preview` `{ slug, data }` | 200 `{ ok:true, errors:[], html }` or 200 `{ ok:false, errors, html:null }` |
+| `PUT /api/clients/:slug` `{ data, create }` | 200 `{ ok:true }`; 422 `{ ok:false, errors }` (nothing written); 409 if `create` and folder has a client.js; 404 if not `create` and missing |
+| `POST /api/clients/:slug/assets?name=<file>` raw body | 201 `{ file }`; 422 `{ error }` |
+| `POST /api/publish` | `{ ok, output }` from `publish` |
+| `GET /p/fonts/:file`, `GET /p/:slug/:file` | preview assets: fonts from the registry, files from `clients/:slug/` |
+
+- `clients[]` items: `{ slug, name, tagline, look, theme:{bg,ink,accent}, logo, linkCount, liveUrl, valid, errors }`,
+  sorted by slug. Folders starting with `_` skipped. A broken client.js shows up with `valid:false`, it never
+  breaks the list. `liveUrl` = `{origin}{base}{slug}/`.
+- `pending`: slugs whose folder has uncommitted git changes (empty list when not a git repo).
+- Preview renders with site `{ origin: 'http://localhost', base: '/p/', mainSite: site.mainSite }`,
+  validating with `files` = what is on disk in that client folder (empty for a new client).
+- PUT validates exactly like build (folder = slug, files on disk) and writes
+  `clients/<slug>/client.js` as `export default <JSON, 2-space indent>\n`. Write is atomic (temp file + rename).
+- Asset upload: `name` is lowercased, spaces -> `-`, then must match the asset regex from validate
+  (svg/png/jpg/jpeg/webp). Max 3 MB. SVG must pass `svgProblem`. Creates the folder if missing
+  (slug already checked). Overwrites a same-named file.
