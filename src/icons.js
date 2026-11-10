@@ -40,6 +40,28 @@ const GLYPHS = {
   // envelope
   email: '<rect x="3.25" y="5.5" width="17.5" height="13" rx="2.5"/><path d="M4.25 7.5L12 13l7.75-5.5"/>',
 
+  // round bubble, tail bottom-left, handset reduced to one hooked stroke
+  whatsapp: '<path d="M3.75 20.25l1.06-4.38a8.5 8.5 0 1 1 3.32 3.31z"/><path d="M9.25 8.5v1a5.5 5.5 0 0 0 5.5 5.5h1"/>',
+  // squarer bubble, tail straight down, the handset rings: one wave
+  viber:
+    '<path d="M8.25 17.75V21l3.25-3.25h4.25a4.5 4.5 0 0 0 4.5-4.5v-5.5a4.5 4.5 0 0 0-4.5-4.5h-7.5a4.5 4.5 0 0 0-4.5 4.5v5.5a4.5 4.5 0 0 0 4.5 4.5z"/><path d="M7.75 7.5v.75a5.5 5.5 0 0 0 5.5 5.5H14M12.5 7a4 4 0 0 1 4 4"/>',
+  // the lozenge and the play triangle
+  youtube: '<rect x="2.75" y="5.5" width="18.5" height="13" rx="4.5"/><path d="M10 9.25v5.5L14.75 12z"/>',
+  // upright bag, tall handle, the S
+  shopee:
+    '<path d="M4.75 8.25h14.5l.7 10.1a2 2 0 0 1-2 2.15H6.05a2 2 0 0 1-2-2.15z"/><path d="M9.25 8.25V6.5a2.75 2.75 0 0 1 5.5 0v1.75M14.3 12.5c-.45-.75-1.3-1.2-2.3-1.2-1.35 0-2.3.7-2.3 1.7 0 2.3 4.6 1.2 4.6 3.5 0 1-.95 1.7-2.3 1.7-1 0-1.85-.45-2.3-1.2"/>',
+  // the heart that is also an open box: lobes, then the fold down to the point
+  lazada: '<path d="M12 20.5l-7.6-7.4a4.4 4.4 0 0 1 6.2-6.2L12 8.3l1.4-1.4a4.4 4.4 0 0 1 6.2 6.2zM7.5 10.25l4.5 3.25 4.5-3.25M12 13.5v7"/>',
+  // heavy stroke drawn as an open bar, light stroke passes behind it
+  x: '<path d="M4.25 4H8.5l11.25 16H15.5zM19 4l-5.6 6.4M10.5 13.7L5 20"/>',
+  // tile with "in"; the dot is the i
+  linkedin: '<rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M8 11.5v5M11.75 11.5v5M11.75 13.75a2.25 2.25 0 0 1 4.5 0v2.75"/>' + dot(8, 8),
+  // ring and three sound bars, each shorter and flatter
+  spotify: '<circle cx="12" cy="12" r="8.75"/><path d="M7.25 9.6c3.3-1 6.9-.7 9.75.9M7.9 12.7c2.7-.75 5.5-.5 7.8.8M8.6 15.6c2-.5 4-.3 5.7.6"/>',
+  // two chain links on the diagonal, each broken where it passes under the other
+  custom:
+    '<path d="M13.27 12.18a3 3 0 0 0-4.84-.85l-4.1 4.1a3 3 0 0 0 4.24 4.24l4.1-4.1a3 3 0 0 0 .5-.67M10.73 11.82a3 3 0 0 0 4.84.85l4.1-4.1a3 3 0 0 0-4.24-4.24l-4.1 4.1a3 3 0 0 0-.5.67"/>',
+
   // extras used by the looks, not link kinds
   arrow: '<path d="M4.75 12h14.5M13.75 6.5L19.25 12l-5.5 5.5"/>',
   out: '<path d="M7 17L17 7M9.5 7H17v7.5"/>',
