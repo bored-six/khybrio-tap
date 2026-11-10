@@ -7,10 +7,13 @@ Separate from the main site (`../Khybrio`) on purpose: a site redesign must neve
 do not apply here. The global `~/.claude/CLAUDE.md` does.
 
 ## Rules
-- The contract is `.claude/specs/contract.md` (v2; details in `.claude/specs/mvp-showcase.md`). Tests in `test/` were written from it first. Change the
+- The contract is `.claude/specs/contract.md` (v3; details in `.claude/specs/mvp-showcase.md` and `.claude/specs/v3-style-and-media.md`). Tests in `test/` were written from it first. Change the
   contract before changing behaviour.
 - We ship no JavaScript of our own. The one exception is YouTube/TikTok video iframes, built only by `videoEmbed`.
   One inline `<style>`. Keep each page under 30 KB before images/fonts.
+- Pages can have a `background` (colour, gradient, photo, mp4) and a `style` (8 shape/fill/layout options, `src/style.js`).
+  Looks declare `supports`; unset = the look as it was. **mp4 files are git-ignored** (`clients/**/*.mp4`): R2 and this Mac are the
+  only copies, so never delete one from `clients/` before it is published. Video cap 15 MB (studio warns over 5 MB), H.264 only.
 - **A chip URL is permanent.** No chips get written until the domain (`tap.khybrio.com`) is live.
   Switching hosts = edit `site.config.js` only. Rename a page only through the studio, which leaves a
   redirect in `clients/_redirects.json` so the old URL keeps working. Never rename a client folder by hand.

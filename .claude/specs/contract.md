@@ -1,4 +1,4 @@
-# Contract: khybrio-tap v2
+# Contract: khybrio-tap v3
 
 Static generator. Each folder in `clients/` becomes one page at `{origin}{base}{slug}/`.
 Pages ship **no JavaScript of our own**: plain HTML with CSS inlined in one `<style>`. The one exception is
@@ -8,6 +8,18 @@ Node >= 20.12, no runtime dependencies (`aws4fetch` is the one publish-time depe
 **v2 delta.** `.claude/specs/mvp-showcase.md` is the full spec for everything below marked v2 (tables, exact messages,
 hosting, publish, studio UI, test list, wave plan). This file keeps the contract rules and points there for detail.
 Where the two ever disagree, fix both in the same commit.
+
+**v3 delta (2026-11-11).** `.claude/specs/v3-style-and-media.md` is the full spec (tables, exact messages, contrast maths, backdrop
+markup/CSS, Range/206 table, studio UI, tests, wave plan); its "User decisions" block overrides its body. Summary of what v3 adds:
+- `plain` look; client keys `background` (color | gradient | image | video) and `style` (8 options: buttonShape, buttonFill, linkLayout,
+  align, logoShape, coverShape, spacing, shadow) with CSS-variable mapping in `src/style.js`. Absent keys = the v2 page byte for byte (no `data-bg`, no `.kb`, no style vars).
+- Looks gain `supports` and `styleDefaults`. Core draws the fixed backdrop layer `.kb`; looks never use `kb*` classes nor put transform/filter/contain/will-change on html/body.
+- Contrast over photo/video is a warning from `worstContrast`/`minDim` (src/color.js); never blocks.
+- mp4 backgrounds: H.264 only, hard cap 15 MB, studio warns over 5 MB. Stored as `<stem>-<md5 8>.mp4`, served `immutable`.
+  `clients/**/*.mp4` is git-ignored (R2 + the author's Mac are the copies); CI's real-clients build must skip missing mp4s.
+- Worker answers Range with 206/416 (iOS Safari will not play video without it) and CSP adds `media-src 'self'`.
+Unchanged hard rules: no `<script`, one inline `<style>`, page HTML < 30 KB (media excluded), look CSS colour from theme vars only.
+Where this file and the v3 spec disagree, fix both in the same commit.
 
 ## Files and ownership
 

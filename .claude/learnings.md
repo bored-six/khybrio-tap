@@ -53,3 +53,13 @@ Khybrio site stays in `bored-six/Khybrio` (old cards point there).
 ## 2026-11-10 - Parallel agents
 - Agents share one git index: a `git commit` takes whatever anyone has staged. Stage only your files and check
   `git show --stat HEAD` after committing.
+
+## 2026-11-11 - v3 style and media
+- iOS Safari will not play an mp4 unless the server answers Range requests with 206. The Worker (and studio `/p/`) must
+  implement 206/416 and `accept-ranges`; deploy the Worker before any video page publishes.
+- The backdrop is a `position:fixed` `.kb` layer, so looks must never put `transform`, `filter`, `contain` or `will-change`
+  on `html`/`body` (each makes fixed position relative to that element and the backdrop scrolls away). Looks also avoid `kb*` classes.
+- `clients/**/*.mp4` is git-ignored on purpose: the repo is public and Publish commits `clients/` as backup, so every replaced
+  video would live in git history forever. Cost: R2 + this Mac are the only copies, and CI's real-clients build must skip missing mp4s.
+  Publish still uploads them (sync reads dist/, not git).
+- Contrast over photo/video is computable in the worst case (dim overlay is theme bg at known opacity vs a black or white pixel), so it is a warning with numbers, not "impossible".
