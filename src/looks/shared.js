@@ -75,6 +75,41 @@ export const BLOCKS =
   `.bv{margin-top:24px}.bv iframe{display:block;width:100%;height:auto;aspect-ratio:16/9;border:0;border-radius:14px;background:var(--line)}` +
   `.bv.vt iframe{aspect-ratio:9/16;max-width:325px;margin:0 auto}`
 
+// --- Style options (contract v3). ---
+
+// The style a look is drawing: its own defaults under the owner's non-null choices.
+// Looks turn this into classes for the few things a custom property cannot switch.
+export function styleOf(ctx, defaults = {}) {
+  const s = { ...defaults }
+  for (const [k, v] of Object.entries(ctx.client.style || {})) if (v) s[k] = v
+  return s
+}
+
+// Runs of plain links between other blocks, for a two-up grid: `wide` is the last link of an
+// odd run (it takes the whole row), `top` the links on the first row of each run.
+export function linkRuns(blocks) {
+  const wide = new Set()
+  const top = new Set()
+  let run = []
+  const close = () => {
+    if (run.length % 2) wide.add(run[run.length - 1])
+    run.slice(0, run.length === 1 ? 1 : 2).forEach((i) => top.add(i))
+    run = []
+  }
+  blocks.forEach((b, i) => (b.type === 'link' && !b.primary ? run.push(i) : close()))
+  close()
+  return { wide, top }
+}
+
+// Bare text over a photo or video carries a halo in the page's own bg colour: invisible on a
+// flat page, a legible edge over the busiest pixel. Anything with its own fill resets it.
+export const halo = (sel) =>
+  `[data-bg=image] ${sel},[data-bg=video] ${sel}{text-shadow:0 0 1px var(--bg),0 0 5px var(--bg),0 0 12px var(--bg),0 0 12px var(--bg),0 0 28px var(--bg)}`
+
+// A hard shadow is ink. Under an ink (solid) button it vanishes, so in hard-shadow mode the
+// button first gets a hairline of page colour, then the shadow: `.hs` on the look's root.
+export const HARD = `box-shadow:0 0 0 1.5px var(--bg),var(--btn-shadow)`
+
 // --- Pieces the newer looks share. Markup only: each look styles the classes itself. ---
 
 export const coverHtml = (ctx) =>

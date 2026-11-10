@@ -11,7 +11,9 @@
 //    left labels start on one edge. In a two-up grid the row becomes a tile, icon over label.
 // 4. Text is bare and full ink. Over a photo or video it carries a halo in the page's own bg
 //    colour: invisible on a flat page, a legible edge over the busiest pixel.
-import { linkOpen, detail, detailHtml, nameSize, credit, coverHtml, logoHtml, branchesHtml, blockHtml, BASE } from './shared.js'
+// 5. A hard shadow is ink, so the material first takes a hairline of page colour (an ink button
+//    would otherwise sink into it), and the gap never drops under 12px: three shadows of clear air.
+import { linkOpen, detail, detailHtml, nameSize, credit, coverHtml, logoHtml, branchesHtml, blockHtml, HARD, BASE } from './shared.js'
 
 function render(ctx) {
   const { client: c, esc } = ctx
@@ -38,7 +40,7 @@ function render(ctx) {
   const cover = coverHtml(ctx)
   const cr = credit(ctx, 'cr')
   return (
-    `<main class="pl${st.linkLayout === 'grid' ? ' g' : ''}${st.coverShape === 'banner' ? ' bn' : ''}">` +
+    `<main class="pl${st.linkLayout === 'grid' ? ' g' : ''}${st.coverShape === 'banner' ? ' bn' : ''}${st.shadow === 'hard' ? ' hs' : ''}">` +
     `<header class="hd">${logoHtml(ctx, 88)}<h1 class="nm ${nameSize(c.name)}">${esc(c.name)}</h1>` +
     (c.tagline ? `<p class="tg">${esc(c.tagline)}</p>` : '') +
     cover +
@@ -99,6 +101,7 @@ const css = () =>
   `.hr{display:flex;align-items:center;justify-content:var(--_j);gap:8px;margin-top:2px;font-variant-numeric:tabular-nums}.hr .ic{width:18px;height:18px}` +
   `.dir{display:inline-flex;align-items:center;gap:6px;min-height:48px;margin-top:10px;padding:0 18px;border-radius:min(var(--_r),24px);font-weight:600;${M}}` +
   `.dir .ic{width:18px;height:18px}` +
+  `.hs{--_g:max(var(--gap,14px),12px)}.hs .b,.hs .bs a,.hs .dir{${HARD}}` +
   `.ft{margin-top:auto;padding-top:36px}.cr{display:inline-flex;align-items:center;min-height:48px;font-size:.875rem}` +
   `.cr strong{margin-left:.3em;font-family:var(--font-heading);font-weight:var(--heading-weight);font-size:1rem}` +
   `@media (min-width:600px){.pl{padding-top:72px}}`

@@ -2,7 +2,12 @@
 // an arched shop window (the cover), the sign (name), then the board itself, where every
 // link is a menu line with dot leaders running to its "price" (an icon, or the actual
 // phone number / email). Branches read like the hours card taped to the door.
-import { blockHtml, linkOpen, detail, detailHtml, nameSize, credit, BASE, BLOCKS } from './shared.js'
+// Style options: the shopfront is symmetrical and a menu line needs the whole row for its dot
+// leaders, so alignment and the two-up layout are not offered. A button fill is what the board
+// is made of: solid is a chalkboard, outline a framed card, glass a pane. The shadow option
+// replaces the ink plate under the main button. Over a photo or video the sign and the notes
+// are bare type with the halo; the board keeps its panel.
+import { blockHtml, linkOpen, detail, detailHtml, nameSize, credit, styleOf, halo, BASE, BLOCKS } from './shared.js'
 
 function render(ctx) {
   const { client: c, esc } = ctx
@@ -45,7 +50,7 @@ function render(ctx) {
 
   const cr = credit(ctx, 'cr')
   return (
-    `<main class="mb${c.cover ? ' has-cv' : ''}${c.logo ? ' has-lg' : ''}">` +
+    `<main class="mb${c.cover ? ' has-cv' : ''}${c.logo ? ' has-lg' : ''}${styleOf(ctx).buttonFill === 'outline' ? ' ol' : ''}">` +
     `<div class="aw" aria-hidden="true"></div>${cover}` +
     `<header class="hd">${logo}<h1 class="nm ${nameSize(c.name)}">${esc(c.name)}</h1>` +
     (c.tagline ? `<p class="tg">${esc(c.tagline)}</p>` : '') +
@@ -66,17 +71,19 @@ const css = () =>
   BASE +
   BLOCKS +
   `.mb{max-width:480px;margin:0 auto;padding-bottom:calc(24px + env(safe-area-inset-bottom));` +
-  `--stripe:color-mix(in srgb,var(--accent) 50%,var(--bg));--panel:color-mix(in srgb,var(--ink) 6%,var(--bg))}` +
+  `--stripe:color-mix(in srgb,var(--accent) 50%,var(--bg));--panel:color-mix(in srgb,var(--ink) 6%,var(--bg));` +
+  `--_g:var(--gap,14px);--_p:min(var(--btn-r,22px),22px);--_l:var(--btn-line,transparent)}` +
   `.aw{height:64px;background-color:var(--accent);` +
   `background-image:linear-gradient(90deg,transparent 50%,var(--stripe) 50%);background-size:56px 100%;background-position:calc(50% + 14px) 0;` +
   `-webkit-mask:${SCALLOP};mask:${SCALLOP};transform-origin:50% 0;animation:unroll .7s cubic-bezier(.2,.9,.25,1.15) both}` +
   `@keyframes unroll{from{transform:scaleY(.3)}}` +
   // arched shop window, double frame
-  `.cv{margin:22px 26px 0;aspect-ratio:4/3;overflow:hidden;border-radius:50% 50% 16px 16px/66.67% 66.67% 16px 16px;` +
+  `.cv{width:var(--cover-w,calc(100% - 52px));max-width:calc(100% - 52px);margin:22px auto 0;aspect-ratio:var(--cover-ratio,4/3);overflow:hidden;` +
+  `border-radius:var(--cover-r,50% 50% 16px 16px/66.67% 66.67% 16px 16px);` +
   `box-shadow:0 0 0 5px var(--bg),0 0 0 7px var(--ink)}.cv img{width:100%;height:100%;object-fit:cover}` +
   // the sign
   `.hd{position:relative;padding:28px 24px 0;text-align:center}` +
-  `.lg{width:84px;height:84px;margin:0 auto 18px;border-radius:50%;object-fit:cover;background:var(--bg);box-shadow:0 0 0 2px var(--ink)}` +
+  `.lg{width:84px;height:84px;margin:0 auto 18px;border-radius:var(--logo-r,50%);object-fit:cover;background:var(--bg);box-shadow:0 0 0 2px var(--ink)}` +
   `.has-cv .lg{margin-top:-62px}` +
   `.nm{font-family:var(--font-heading);font-weight:var(--heading-weight);letter-spacing:-.03em;overflow-wrap:anywhere;text-wrap:balance}` +
   `.n1{font-size:3.5rem;line-height:.95}.n2{font-size:2.6rem;line-height:1}.n3{font-size:1.9rem;line-height:1.08}` +
@@ -86,17 +93,21 @@ const css = () =>
   `linear-gradient(var(--ink),var(--ink)) 0 50%/54px 1.5px no-repeat,linear-gradient(var(--ink),var(--ink)) 100% 50%/54px 1.5px no-repeat}` +
   // primary: pill with an ink plate under it, presses down onto it
   `.pr{display:flex;align-items:center;justify-content:center;gap:12px;min-height:68px;margin:0;padding:12px 26px;` +
-  `border-radius:999px;background:var(--accent);color:var(--on-accent);font-weight:700;font-size:1.3rem;line-height:1.2;text-align:center;` +
-  `overflow-wrap:anywhere;box-shadow:0 5px 0 var(--ink);transition:transform .12s,box-shadow .12s}` +
-  `.pr .ic{width:26px;height:26px}.pr:active{transform:translateY(4px);box-shadow:0 1px 0 var(--ink)}` +
+  `border-radius:var(--btn-r,999px);background:var(--accent);color:var(--on-accent);font-weight:700;font-size:1.3rem;line-height:1.2;text-align:center;` +
+  `overflow-wrap:anywhere;text-shadow:none;box-shadow:var(--btn-shadow,0 5px 0 var(--ink));transition:transform .12s,box-shadow .12s}` +
+  `.pr .ic{width:26px;height:26px}.pr:active{transform:translateY(4px);box-shadow:var(--btn-shadow,0 1px 0 var(--ink))}` +
   // the board
-  `.bk{margin:26px 20px 0}.bk>*+.pr{margin-top:20px}.bk>.it{margin:0;padding:15px 12px}.bk>.pr{margin:0 0 4px}.bk>.it+.it{border-top:1px dashed var(--line)}` +
-  `.bk>.it{background:var(--panel)}.bk>.it:first-child,.bk>:not(.it)+.it{border-radius:22px 22px 0 0;margin-top:20px;padding-top:23px}` +
-  `.bk>.it:last-child,.bk>.it:has(+:not(.it)){border-radius:0 0 22px 22px;padding-bottom:23px}` +
-  `.bk>.it:only-child,.bk>:not(.it)+.it:has(+:not(.it)){border-radius:22px}` +
-  `.it{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;min-height:56px}` +
+  `.bk{margin:26px 20px 0}.bk>*+.pr{margin-top:20px}.bk>.it{margin:0;padding:calc(var(--_g) + 1px) 12px}.bk>.pr{margin:0 0 4px}` +
+  `.bk>.it+.it{border-top:1px dashed color-mix(in srgb,currentColor 22%,transparent)}` +
+  // the board's material; --t and --b close the outline at the top and bottom of a run of lines
+  `.bk>.it{--t:0;--b:0;background:var(--btn-bg,var(--panel));color:var(--btn-ink,inherit);-webkit-backdrop-filter:var(--btn-blur,none);backdrop-filter:var(--btn-blur,none);` +
+  `text-shadow:none;box-shadow:inset 1.5px 0 var(--_l),inset -1.5px 0 var(--_l),inset 0 var(--t) var(--_l),inset 0 var(--b) var(--_l)}` +
+  `.bk>.it:first-child,.bk>:not(.it)+.it{--t:1.5px;border-radius:var(--_p) var(--_p) 0 0;margin-top:calc(var(--_g) + 6px);padding-top:calc(var(--_g) + 9px)}` +
+  `.bk>.it:last-child,.bk>.it:has(+:not(.it)){--b:-1.5px;border-radius:0 0 var(--_p) var(--_p);padding-bottom:calc(var(--_g) + 9px)}` +
+  `.bk>.it:only-child,.bk>:not(.it)+.it:has(+:not(.it)){border-radius:var(--_p)}` +
+  `.it{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;min-height:var(--btn-h,56px)}` +
   `.it .lb{min-width:0;max-width:72%;font:var(--heading-weight) 1.1875rem/1.25 var(--font-heading);overflow-wrap:anywhere}` +
-  `.ld{flex:1 1 20px;min-width:20px;height:6px;background:radial-gradient(circle,var(--ink) 1.1px,transparent 1.6px) 0 0/7px 6px repeat-x}` +
+  `.ld{flex:1 1 20px;min-width:20px;height:6px;background:radial-gradient(circle,currentColor 1.1px,transparent 1.6px) 0 0/7px 6px repeat-x}` +
   `.it .ic{align-self:center}.dt{max-width:55%;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}` +
   `.dt2{flex-basis:100%;font-weight:600;overflow-wrap:anywhere}.it:active .lb{text-decoration:underline;text-underline-offset:.2em}` +
   // blocks, board-native: a heading is a centred chalk title over the sign's ornament, text is a
@@ -119,10 +130,18 @@ const css = () =>
   `.hr{display:flex;align-items:baseline;gap:10px;margin-top:6px;font-weight:600;font-variant-numeric:tabular-nums}` +
   `.hr .k{font-weight:400}.hr span:last-child{max-width:70%;text-align:right;overflow-wrap:anywhere}` +
   `.dir{display:inline-flex;align-items:center;gap:8px;min-height:48px;margin-top:14px;padding:0 20px;` +
-  `border:2px solid var(--ink);border-radius:999px;font-weight:700}.dir .ic{width:18px;height:18px}` +
+  `border:2px solid var(--ink);border-radius:var(--btn-r,999px);background:var(--bg);text-shadow:none;font-weight:700}.dir .ic{width:18px;height:18px}` +
   `.dir:active{background:var(--panel)}` +
+  halo('.mb') +
+  `.ol .bk>.it{text-shadow:inherit}` +
   `.ft{margin-top:36px;text-align:center}.cr{display:inline-flex;align-items:center;min-height:48px;padding:0 12px;font-size:.875rem}` +
   `.cr strong{margin-left:.3em;font-family:var(--font-heading);font-weight:var(--heading-weight);font-size:1rem}` +
   `@media (min-width:600px){body{padding:0 24px}.aw{border-radius:0 0 2px 2px}}`
 
-export default { label: 'Menu board', render, css }
+export default {
+  label: 'Menu board',
+  render,
+  css,
+  supports: ['buttonShape', 'buttonFill', 'logoShape', 'coverShape', 'spacing', 'shadow'],
+  styleDefaults: { buttonShape: 'pill', logoShape: 'circle' },
+}
