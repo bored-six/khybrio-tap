@@ -1,8 +1,8 @@
 // Helpers both looks use. Every client string goes through ctx.esc before it touches markup.
 
 // The one way a client link opens. data-kind ONLY here, never on branch or credit links.
-export const linkOpen = (ctx, l, i, cls) =>
-  `<a class="${cls}" href="${ctx.esc(l.url)}" data-kind="${ctx.esc(l.kind)}"${i === 0 ? ' data-primary' : ''}>`
+export const linkOpen = (ctx, l, cls) =>
+  `<a class="${cls}" data-block="link" href="${ctx.esc(l.url)}" data-kind="${ctx.esc(l.kind)}"${l.primary ? ' data-primary' : ''}>`
 
 // Phone and email show the actual number/address: people tap a card to get exactly that.
 export function detail(l) {
@@ -40,3 +40,37 @@ export const BASE =
   `img{display:block;max-width:100%}` +
   `.ic{width:22px;height:22px;flex:none}` +
   `@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}`
+
+// Default renderer for every block type. `cls` is the class a link anchor gets.
+// Exactly one element per block carries data-block.
+export function blockHtml(ctx, b, cls = 'it') {
+  const { esc } = ctx
+  if (b.type === 'heading') return `<h2 class="bh" data-block="heading">${esc(b.text)}</h2>`
+  if (b.type === 'text') return `<p class="bt" data-block="text">${ctx.text(b.text)}</p>`
+  if (b.type === 'socials')
+    return (
+      `<div class="bs" data-block="socials">` +
+      b.items
+        .map((i) => `<a href="${esc(i.url)}" data-kind="${esc(i.kind)}" aria-label="${esc(i.label)}">${ctx.icon(i.kind)}</a>`)
+        .join('') +
+      `</div>`
+    )
+  if (b.type === 'video') return `<div class="bv${b.vertical ? ' vt' : ''}" data-block="video">${ctx.embed(b)}</div>`
+  const d = detail(b)
+  return (
+    `${linkOpen(ctx, b, cls)}${ctx.icon(b.kind)}` +
+    `<span class="lb">${esc(b.label)}${d ? `<span class="dt">${detailHtml(ctx, d)}</span>` : ''}</span>` +
+    `<span class="ar">${ctx.icon('arrow')}</span></a>`
+  )
+}
+
+// Functional CSS for heading, text, socials and video blocks. Colour only from theme vars.
+export const BLOCKS =
+  `.bh{margin-top:32px;font-family:var(--font-heading);font-weight:var(--heading-weight);font-size:1.5rem;line-height:1.15;` +
+  `letter-spacing:-.01em;overflow-wrap:anywhere;text-wrap:balance}` +
+  `.bt{margin-top:14px;max-width:60ch;overflow-wrap:anywhere}` +
+  `.bs{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}` +
+  `.bs a{display:grid;place-items:center;width:48px;height:48px;border:1.75px solid var(--ink);border-radius:50%}` +
+  `.bs a:active{background:var(--line)}.bs .ic{width:22px;height:22px}` +
+  `.bv{margin-top:24px}.bv iframe{display:block;width:100%;height:auto;aspect-ratio:16/9;border:0;border-radius:14px;background:var(--line)}` +
+  `.bv.vt iframe{aspect-ratio:9/16;max-width:325px;margin:0 auto}`
