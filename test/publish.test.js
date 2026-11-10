@@ -380,3 +380,59 @@ test('.env.local is git-ignored', () => {
 test('.wrangler/ is git-ignored', () => {
   assert.doesNotThrow(() => execFileSync('git', ['check-ignore', '-q', '.wrangler/state/x'], { cwd: REPO }))
 })
+
+// ---- v3: mp4 hosting (spec section 6) --------------------------------------------------------
+import { metaFor } from '../src/publish/sync.js'
+
+const MP4_META = { contentType: 'video/mp4', cacheControl: 'public, max-age=31536000, immutable' }
+
+test('metaFor: mp4 is video/mp4 with a year-long immutable cache (the name changes with the content)', () => {
+  assert.deepEqual(metaFor('alpha-cafe/clip-0123abcd.mp4'), MP4_META)
+  assert.deepEqual(metaFor('alpha-cafe/CLIP.MP4'), MP4_META)
+})
+
+test('metaFor: images keep the 5 minute cache, html and fonts are unchanged', () => {
+  assert.deepEqual(metaFor('alpha-cafe/poster.jpg'), { contentType: 'image/jpeg', cacheControl: 'public, max-age=300' })
+  assert.deepEqual(metaFor('alpha-cafe/index.html'), { contentType: 'text/html; charset=utf-8', cacheControl: 'no-cache' })
+  assert.deepEqual(metaFor('fonts/f.woff2'), { contentType: 'font/woff2', cacheControl: 'public, max-age=604800' })
+})
+
+test('syncDir uploads a new mp4 with the immutable metadata', async () => {
+  const dir = await tmp('dir')
+  const video = Buffer.alloc(300 * 1024, 7)
+  await writeTree(dir, { ...SITE_FILES, 'alpha-cafe/clip-0123abcd.mp4': video })
+  const store = fakeStore(SITE_FILES)
+  const res = await syncDir({ dir, store })
+  assert.deepEqual(res.uploaded, ['alpha-cafe/clip-0123abcd.mp4'])
+  assert.deepEqual(store.puts.map((p) => p.key), ['alpha-cafe/clip-0123abcd.mp4'])
+  assert.deepEqual(store.puts[0].meta, MP4_META)
+})
+
+test('an mp4 whose md5 already matches the bucket is not uploaded again', async () => {
+  const dir = await tmp('dir')
+  const video = Buffer.alloc(6 * 1024 * 1024, 9)
+  const files = { ...SITE_FILES, 'alpha-cafe/clip-0123abcd.mp4': video }
+  await writeTree(dir, files)
+  const store = fakeStore(files)
+  const res = await syncDir({ dir, store })
+  assert.deepEqual(res.uploaded, [])
+  assert.equal(res.unchanged, Object.keys(files).length)
+  assert.deepEqual(store.puts, [])
+})
+
+test('a changed mp4 under the same name is uploaded, its neighbours are not', async () => {
+  const dir = await tmp('dir')
+  const files = { ...SITE_FILES, 'alpha-cafe/clip-0123abcd.mp4': Buffer.alloc(1024, 1) }
+  await writeTree(dir, files)
+  const store = fakeStore({ ...files, 'alpha-cafe/clip-0123abcd.mp4': Buffer.alloc(1024, 2) })
+  const res = await syncDir({ dir, store })
+  assert.deepEqual(res.uploaded, ['alpha-cafe/clip-0123abcd.mp4'])
+})
+
+test('an mp4 that is no longer in the build is deleted from the bucket', async () => {
+  const dir = await tmp('dir')
+  await writeTree(dir, SITE_FILES)
+  const store = fakeStore({ ...SITE_FILES, 'alpha-cafe/old-aaaaaaaa.mp4': Buffer.alloc(64, 3) })
+  const res = await syncDir({ dir, store })
+  assert.deepEqual(res.deleted, ['alpha-cafe/old-aaaaaaaa.mp4'])
+})

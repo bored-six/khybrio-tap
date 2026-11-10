@@ -170,7 +170,7 @@ test('PUT checks folder/slug agreement, create collisions and missing clients', 
 })
 
 test('PUT referencing an uploaded logo validates against files on disk', async () => {
-  const up = await api('/api/clients/logo-co/assets?name=Logo%20Mark.PNG', { method: 'POST', headers: { 'x-khybrio-studio': '1', 'content-type': 'image/png' }, raw: Buffer.from([0x89, 0x50, 0x4e, 0x47]) })
+  const up = await api('/api/clients/logo-co/assets?name=Logo%20Mark.PNG', { method: 'POST', headers: { 'x-khybrio-studio': '1', 'content-type': 'image/png' }, raw: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) }) // v3 sniffs magic bytes: a real PNG signature, not just 4 bytes
   assert.equal(up.status, 201)
   const { file } = await up.json()
   assert.equal(file, 'logo-mark.png')
@@ -450,4 +450,264 @@ test('backup state: failed when the git push rejects', async () => {
   const b = await waitForBackup('failed')
   assert.equal(typeof b.output, 'string')
   assert.ok(b.at)
+})
+
+/* ================================================================ v3: media upload, preview Range, orphans, state (spec sections 6 and 7) */
+import { createHash } from 'node:crypto'
+import { looks as realLooks } from '../src/looks/index.js'
+import * as assetsModule from '../src/assets.js' // namespace import: a missing MEDIA fails the v3 tests, not the whole file
+const mediaLimits = () => assetsModule.MEDIA
+import { STYLE_KEYS } from '../src/style.js'
+import { mp4 as makeMp4, ftyp as mp4Ftyp, PNG as REAL_PNG, JPEG as REAL_JPEG } from './mp4-fixtures.js'
+
+const MB = 1024 * 1024
+const md5 = (b) => createHash('md5').update(b).digest('hex')
+const SLOW_WARNING = 'This MP4 starts slowly on phones (index at the end). Re-export with "optimize for web" or "fast start".'
+const HEVC_ERROR = 'This video is HEVC (iPhone default). Export it as H.264 ("Most Compatible") so Android phones can play it'
+
+const upload = (slug, name, body) =>
+  fetch(`${base}/api/clients/${slug}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'x-khybrio-studio': '1', 'content-type': 'application/octet-stream' }, body })
+const folderFiles = (slug) => readdir(join(root, 'clients', slug)).catch(() => [])
+
+// An mp4 whose total size is exactly `total` bytes (valid boxes, padded inside mdat).
+function mp4Of(total, opts = {}) {
+  const empty = makeMp4({ ...opts, mdatBytes: 0 }).length
+  const out = makeMp4({ ...opts, mdatBytes: total - empty })
+  assert.equal(out.length, total)
+  return out
+}
+
+test('mp4 upload: 201, the server names it stem-md5(first 8 hex).mp4, bytes land intact, no temp file left', async () => {
+  const body = makeMp4({ faststart: true, mdatBytes: 4096 })
+  const res = await upload('vid-co', 'Clip.MP4', body)
+  assert.equal(res.status, 201)
+  const out = await res.json()
+  assert.equal(out.file, `clip-${md5(body).slice(0, 8)}.mp4`)
+  assert.match(out.file, /^clip-[0-9a-f]{8}\.mp4$/)
+  assert.deepEqual(out.warnings, [])
+  assert.deepEqual(await folderFiles('vid-co'), [out.file])
+  assert.deepEqual(await readFile(join(root, 'clients', 'vid-co', out.file)), body)
+})
+
+test('mp4 upload: spaces become dashes in the stem; different content gets a different name, the same content the same name', async () => {
+  const a = makeMp4({ mdatBytes: 100 })
+  const b = makeMp4({ mdatBytes: 101 })
+  const r1 = await (await upload('vid-co', 'My Promo.mp4', a)).json()
+  const r2 = await (await upload('vid-co', 'My Promo.mp4', b)).json()
+  const r3 = await (await upload('vid-co', 'My Promo.mp4', a)).json()
+  assert.match(r1.file, /^my-promo-[0-9a-f]{8}\.mp4$/)
+  assert.notEqual(r1.file, r2.file)
+  assert.equal(r1.file, r3.file)
+  assert.deepEqual((await folderFiles('vid-co')).sort(), [r1.file, r2.file].sort())
+})
+
+test('mp4 upload: index at the end succeeds with the slow-start warning', async () => {
+  const res = await upload('vid-co', 'slow.mp4', makeMp4({ faststart: false, mdatBytes: 2048 }))
+  assert.equal(res.status, 201)
+  const out = await res.json()
+  assert.deepEqual(out.warnings, [SLOW_WARNING])
+  assert.deepEqual(await folderFiles('vid-co'), [out.file])
+})
+
+test('mp4 upload: HEVC is refused with the export instructions and leaves nothing behind', async () => {
+  const res = await upload('vid-co', 'iphone.mp4', makeMp4({ codecs: ['hvc1'] }))
+  assert.equal(res.status, 422)
+  assert.equal((await res.json()).error, HEVC_ERROR)
+  assert.deepEqual(await folderFiles('vid-co'), [])
+})
+
+test('mp4 upload: not an mp4 at all is refused, nothing left behind', async () => {
+  const res = await upload('vid-co', 'fake.mp4', Buffer.from('definitely not a video'))
+  assert.equal(res.status, 422)
+  assert.equal(typeof (await res.json()).error, 'string')
+  assert.deepEqual(await folderFiles('vid-co'), [])
+})
+
+test('mp4 upload: exactly 15 MB is accepted, one byte more is 422 "File is over 15 MB" with no file and no temp left', async () => {
+  const atCap = await upload('vid-co', 'cap.mp4', mp4Of(mediaLimits().videoMax))
+  assert.equal(atCap.status, 201)
+  const files = await folderFiles('vid-co')
+  assert.equal(files.length, 1)
+  await rm(join(root, 'clients', 'vid-co', files[0]))
+
+  const over = await upload('vid-co', 'big.mp4', mp4Of(mediaLimits().videoMax + 1))
+  assert.equal(over.status, 422)
+  assert.equal((await over.json()).error, 'File is over 15 MB')
+  assert.deepEqual(await folderFiles('vid-co'), [])
+})
+
+test('mp4 upload: a huge junk body is refused at the cap without leaving a temp file', async () => {
+  const res = await upload('vid-co', 'junk.mp4', Buffer.alloc(mediaLimits().videoMax + 4096, 0x41))
+  assert.equal(res.status, 422)
+  assert.equal((await res.json()).error, 'File is over 15 MB')
+  assert.deepEqual(await folderFiles('vid-co'), [])
+})
+
+test('image upload: over 3 MB says so; a real PNG is 201 with empty warnings', async () => {
+  const over = await upload('img-co', 'big.png', Buffer.concat([REAL_PNG, Buffer.alloc(mediaLimits().imageMax)]))
+  assert.equal(over.status, 422)
+  assert.equal((await over.json()).error, 'File is over 3 MB')
+  assert.deepEqual(await folderFiles('img-co'), [])
+  const ok = await upload('img-co', 'Logo Mark.PNG', REAL_PNG)
+  assert.equal(ok.status, 201)
+  assert.deepEqual(await ok.json(), { file: 'logo-mark.png', warnings: [] })
+})
+
+test('upload: bytes that do not match the extension are refused (jpeg named .png) and nothing is kept', async () => {
+  const res = await upload('img-co', 'photo.png', REAL_JPEG)
+  assert.equal(res.status, 422)
+  assert.equal((await res.json()).error, 'File content is not a real PNG')
+  assert.deepEqual(await folderFiles('img-co'), [])
+  const text = await upload('img-co', 'nope.jpg', Buffer.from('just text'))
+  assert.equal(text.status, 422)
+  assert.deepEqual(await folderFiles('img-co'), [])
+  const mp4AsPng = await upload('img-co', 'clip.png', makeMp4())
+  assert.equal(mp4AsPng.status, 422)
+  assert.deepEqual(await folderFiles('img-co'), [])
+})
+
+test('upload: names outside the image and mp4 types are refused (mov, webm, avi, mp4 with a path)', async () => {
+  for (const name of ['clip.mov', 'clip.webm', 'clip.avi', '../clip.mp4', 'a/clip.mp4', 'clip.mp4.exe', '.up-1-1']) {
+    const res = await upload('img-co', name, makeMp4())
+    assert.equal(res.status, 422, name)
+  }
+  assert.deepEqual(await folderFiles('img-co'), [])
+})
+
+test('preview serves mp4 with video/mp4 and accept-ranges', async () => {
+  await seed('prev-co', valid('prev-co'))
+  const data = Buffer.from(Array.from({ length: 90 }, (_, i) => 0x21 + i))
+  await writeFile(join(root, 'clients', 'prev-co', 'clip.mp4'), data)
+  const res = await fetch(`${base}/p/prev-co/clip.mp4`)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('content-type'), 'video/mp4')
+  assert.equal(res.headers.get('accept-ranges'), 'bytes')
+  assert.deepEqual(Buffer.from(await res.arrayBuffer()), data)
+})
+
+test('preview mp4 Range: 206 with content-range, 416 past the end, malformed ignored (Safari needs this)', async () => {
+  await seed('prev-co', valid('prev-co'))
+  const data = Buffer.from(Array.from({ length: 90 }, (_, i) => 0x21 + i))
+  await writeFile(join(root, 'clients', 'prev-co', 'clip.mp4'), data)
+  const get = (range) => fetch(`${base}/p/prev-co/clip.mp4`, { headers: { range } })
+  const cases = [['bytes=10-19', 10, 19], ['bytes=80-', 80, 89], ['bytes=-10', 80, 89], ['bytes=0-0', 0, 0], ['bytes=85-500', 85, 89]]
+  for (const [range, s0, e0] of cases) {
+    const res = await get(range)
+    assert.equal(res.status, 206, range)
+    assert.equal(res.headers.get('content-range'), `bytes ${s0}-${e0}/90`, range)
+    assert.equal(res.headers.get('content-length'), String(e0 - s0 + 1), range)
+    assert.equal(res.headers.get('content-type'), 'video/mp4', range)
+    assert.equal(res.headers.get('accept-ranges'), 'bytes', range)
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()), data.subarray(s0, e0 + 1), range)
+  }
+  for (const range of ['bytes=90-', 'bytes=200-300', 'bytes=5-2', 'bytes=-0']) {
+    const res = await get(range)
+    assert.equal(res.status, 416, range)
+    assert.equal(res.headers.get('content-range'), 'bytes */90', range)
+    assert.equal((await res.arrayBuffer()).byteLength, 0, range)
+  }
+  for (const range of ['bytes=abc', 'bytes=0-1,5-6', 'items=0-5']) {
+    const res = await get(range)
+    assert.equal(res.status, 200, range)
+    assert.equal((await res.arrayBuffer()).byteLength, 90, range)
+  }
+})
+
+test('preview of a page with a video background renders the backdrop and points at /p/', async () => {
+  await seed('prev-co', valid('prev-co'))
+  await writeFile(join(root, 'clients', 'prev-co', 'clip.mp4'), makeMp4())
+  await writeFile(join(root, 'clients', 'prev-co', 'poster.jpg'), REAL_JPEG)
+  const data = valid('prev-co', { background: { type: 'video', file: 'clip.mp4', poster: 'poster.jpg' }, style: { buttonFill: 'glass', shadow: 'soft' } })
+  const res = await (await api('/api/preview', { method: 'POST', body: { slug: 'prev-co', data } })).json()
+  assert.equal(res.ok, true, res.errors?.join('\n'))
+  assert.match(res.html, /<html lang="en" data-bg="video">/)
+  assert.ok(res.html.includes('src="/p/prev-co/clip.mp4"'))
+  assert.ok(res.html.includes('--btn-shadow:'))
+  assert.ok(res.warnings.some((w) => w.startsWith('background.dim: text can drop to')), 'contrast hint reaches the studio')
+})
+
+/* ---- orphans ---- */
+
+const bgData = (slug, extra = {}) => valid(slug, { background: { type: 'video', file: 'clip-bbbbbbbb.mp4', poster: 'clip-bbbbbbbb-poster.jpg', dim: 60 }, ...extra })
+
+async function seedFolder(slug, names) {
+  await seed(slug, valid(slug))
+  for (const n of names) await writeFile(join(root, 'clients', slug, n), n.endsWith('.svg') ? '<svg/>' : 'x')
+}
+
+test('PUT removes studio-made media the saved data no longer references, keeps everything else', async () => {
+  const names = [
+    'clip-bbbbbbbb.mp4', // referenced video
+    'clip-bbbbbbbb-poster.jpg', // referenced poster
+    'clip-aaaaaaaa.mp4', // orphan video
+    'clip-aaaaaaaa-poster.jpg', // orphan poster
+    'promo-cafebabe.webp', // orphan studio-style image
+    'shot-12345678.jpeg', // orphan studio-style image
+    'hero.mp4', // hand-placed: no hash in the name
+    'my-photo.jpg', // hand-placed
+    'logo.svg', // never touched (svg)
+    'brand-12345678.png', // png is not in the cleanup pattern
+    'brand-deadbeef.jpg', // referenced as the logo below
+  ]
+  await seedFolder('orph-co', names)
+  const res = await api('/api/clients/orph-co', { method: 'PUT', body: { data: bgData('orph-co', { logo: 'brand-deadbeef.jpg' }), create: false } })
+  assert.equal(res.status, 200, JSON.stringify(await res.clone().json()))
+  const left = (await folderFiles('orph-co')).sort()
+  assert.deepEqual(left, ['brand-12345678.png', 'brand-deadbeef.jpg', 'client.js', 'clip-bbbbbbbb-poster.jpg', 'clip-bbbbbbbb.mp4', 'hero.mp4', 'logo.svg', 'my-photo.jpg'])
+})
+
+test('PUT keeps a hashed file the data references as cover or as an image background', async () => {
+  await seedFolder('orph-co', ['cover-11111111.jpg', 'bgpic-22222222.webp', 'old-33333333.webp'])
+  const data = valid('orph-co', { cover: 'cover-11111111.jpg', background: { type: 'image', file: 'bgpic-22222222.webp' } })
+  assert.equal((await api('/api/clients/orph-co', { method: 'PUT', body: { data, create: false } })).status, 200)
+  assert.deepEqual((await folderFiles('orph-co')).sort(), ['bgpic-22222222.webp', 'client.js', 'cover-11111111.jpg'])
+})
+
+test('switching the background to a colour releases its studio-made files', async () => {
+  await seedFolder('orph-co', ['clip-bbbbbbbb.mp4', 'clip-bbbbbbbb-poster.jpg', 'hero.mp4'])
+  assert.equal((await api('/api/clients/orph-co', { method: 'PUT', body: { data: valid('orph-co', { background: { type: 'color' } }), create: false } })).status, 200)
+  assert.deepEqual((await folderFiles('orph-co')).sort(), ['client.js', 'hero.mp4'])
+})
+
+test('a rejected PUT deletes nothing', async () => {
+  const names = ['clip-aaaaaaaa.mp4', 'clip-aaaaaaaa-poster.jpg', 'promo-cafebabe.webp']
+  await seedFolder('orph-co', names)
+  const bad = valid('orph-co', { background: { type: 'image', file: 'not-there.png' } })
+  const res = await api('/api/clients/orph-co', { method: 'PUT', body: { data: bad, create: false } })
+  assert.equal(res.status, 422)
+  assert.deepEqual((await folderFiles('orph-co')).sort(), ['client.js', ...names].sort())
+})
+
+test('a saved v3 client reads back exactly: background and style survive the round trip through client.js', async () => {
+  await seedFolder('orph-co', ['clip-bbbbbbbb.mp4', 'clip-bbbbbbbb-poster.jpg'])
+  const data = bgData('orph-co', { style: { buttonShape: 'pill', buttonFill: 'glass', coverShape: 'circle' } })
+  const put = await api('/api/clients/orph-co', { method: 'PUT', body: { data, create: false } })
+  assert.equal(put.status, 200)
+  const got = await (await api('/api/clients/orph-co')).json()
+  assert.deepEqual(got.data.background, data.background)
+  assert.deepEqual(got.data.style, data.style)
+  assert.ok(got.files.includes('clip-bbbbbbbb.mp4'))
+})
+
+/* ---- state ---- */
+
+test('state: every look carries supports and styleDefaults, plus style options and media limits', async () => {
+  const s = await (await api('/api/state')).json()
+  assert.ok(s.looks.some((l) => l.id === 'plain'), 'plain look listed')
+  for (const l of s.looks) {
+    assert.deepEqual(l.supports, realLooks[l.id].supports, l.id)
+    assert.deepEqual(l.styleDefaults, realLooks[l.id].styleDefaults, l.id)
+    assert.equal(typeof l.label, 'string')
+  }
+  assert.deepEqual(s.media, mediaLimits())
+  assert.deepEqual(Object.keys(s.style).sort(), [...STYLE_KEYS].sort())
+  const options = (v) => (Array.isArray(v) ? v : Object.keys(v))
+  assert.deepEqual(options(s.style.buttonShape), ['square', 'rounded', 'pill'])
+  assert.deepEqual(options(s.style.buttonFill), ['solid', 'outline', 'soft', 'glass'])
+  assert.deepEqual(options(s.style.linkLayout), ['list', 'grid'])
+  assert.deepEqual(options(s.style.align), ['left', 'center'])
+  assert.deepEqual(options(s.style.logoShape), ['square', 'rounded', 'circle'])
+  assert.deepEqual(options(s.style.coverShape), ['banner', 'rounded', 'circle'])
+  assert.deepEqual(options(s.style.spacing), ['compact', 'comfortable'])
+  assert.deepEqual(options(s.style.shadow), ['none', 'soft', 'hard'])
 })

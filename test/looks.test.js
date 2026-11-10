@@ -235,3 +235,156 @@ test('card look draws the cover image when one is set, and not otherwise', () =>
   const none = validateClient(base, { folder: 'x-cafe', looks: Object.keys(looks), fonts: Object.keys(fonts), files: [] })
   assert.ok(!/cover\.jpg/.test(renderPage(none.client, SITE, { looks, fonts, icon })))
 })
+
+/* ================================================================ v3: look interface additions (spec section 4) */
+import { STYLE, STYLE_KEYS } from '../src/style.js'
+
+const VARS_OF_KEY = {
+  buttonShape: ['--btn-r'],
+  buttonFill: ['--btn-bg', '--btn-ink', '--btn-line', '--btn-blur'],
+  linkLayout: ['--link-cols'],
+  align: ['--align', '--justify'],
+  logoShape: ['--logo-r'],
+  coverShape: ['--cover-r', '--cover-ratio', '--cover-w'],
+  spacing: ['--gap', '--btn-h'],
+  shadow: ['--btn-shadow'],
+}
+const NO_STYLE_V3 = Object.fromEntries(STYLE_KEYS.map((k) => [k, null]))
+const ALL_STYLE_V3 = { buttonShape: 'pill', buttonFill: 'glass', linkLayout: 'grid', align: 'left', logoShape: 'circle', coverShape: 'circle', spacing: 'compact', shadow: 'hard' }
+const VIDEO_BG = { type: 'video', file: 'clip.mp4', poster: 'poster.jpg', blur: 4, dim: 40, focus: [50, 50] }
+const withV3 = (c, background, style) => ({ ...c, background, style: { ...NO_STYLE_V3, ...style } })
+
+// Look CSS only: the page style minus :root and minus anything core adds for a backdrop.
+const lookCssOf = (lookId) => styleOf(renderPage(everything(lookId), SITE_PATH, { looks, fonts })).replace(/:root\s*\{[^}]*\}/, '')
+
+// Every top-level rule as { selectors: [...], body }, nested @media rules flattened.
+function rulesOf(cssText) {
+  const out = []
+  for (const m of cssText.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const sel = m[1].trim()
+    if (sel.startsWith('@')) continue
+    out.push({ selectors: sel.split(',').map((x) => x.trim()), body: m[2] })
+  }
+  return out
+}
+const lastCompound = (sel) => sel.split(/[\s>+~]+/).filter(Boolean).pop() || ''
+
+test('plain is a registered look', () => {
+  assert.ok(looks.plain, 'looks.plain')
+  assert.equal(typeof looks.plain.label, 'string')
+})
+
+test('plain supports all eight style keys, with the spec defaults', () => {
+  assert.deepEqual([...looks.plain.supports].sort(), [...STYLE_KEYS].sort())
+  assert.deepEqual(looks.plain.styleDefaults, {
+    buttonShape: 'rounded',
+    buttonFill: 'soft',
+    linkLayout: 'list',
+    align: 'center',
+    logoShape: 'circle',
+    coverShape: 'rounded',
+    spacing: 'comfortable',
+    shadow: 'none',
+  })
+})
+
+for (const lookId of Object.keys(looks)) {
+  const look = looks[lookId]
+
+  test(`look "${lookId}": supports is an array of known style keys, always including logoShape`, () => {
+    assert.ok(Array.isArray(look.supports), 'supports must be an array')
+    assert.equal(new Set(look.supports).size, look.supports.length, 'no duplicates')
+    for (const k of look.supports) assert.ok(STYLE_KEYS.includes(k), `unknown style key ${k}`)
+    assert.ok(look.supports.includes('logoShape'), 'every look supports at least logoShape')
+  })
+
+  test(`look "${lookId}": styleDefaults only names supported keys, with valid values`, () => {
+    assert.equal(typeof look.styleDefaults, 'object')
+    assert.ok(look.styleDefaults !== null && !Array.isArray(look.styleDefaults))
+    for (const [k, v] of Object.entries(look.styleDefaults)) {
+      assert.ok((look.supports ?? []).includes(k), `${k} has a default but is not in supports`)
+      assert.ok(Object.hasOwn(STYLE[k] ?? {}, v), `${k}: "${v}" is not a ${k} value`)
+    }
+  })
+
+  test(`look "${lookId}": its css reads every variable of every key it supports`, () => {
+    const c = lookCssOf(lookId)
+    for (const key of look.supports ?? []) {
+      for (const v of VARS_OF_KEY[key]) assert.ok(c.includes(`var(${v}`), `supports ${key} but css never reads var(${v}`)
+    }
+  })
+
+  test(`look "${lookId}": never transforms, filters, contains or will-changes html or body`, () => {
+    for (const rule of rulesOf(lookCssOf(lookId))) {
+      if (!rule.selectors.some((s) => /^(html|body)(\[[^\]]*\])?$/.test(lastCompound(s)))) continue
+      assert.ok(!/(^|;|\s)(transform|filter|contain|will-change|backdrop-filter)\s*:/.test(rule.body), `${rule.selectors.join(',')}{${rule.body}}`)
+    }
+  })
+
+  test(`look "${lookId}": no class starting with kb in its markup or css`, () => {
+    const html = renderPage(everything(lookId), SITE_PATH, { looks, fonts })
+    assert.ok(!/class="[^"]*\bkb/.test(stripStyle(html)), 'kb class in markup')
+    assert.ok(!/\.kb/.test(styleOf(html)), '.kb in css')
+  })
+
+  test(`look "${lookId}": section 7 holds with a video background and all eight style keys set`, () => {
+    const c = withV3(everything(lookId), VIDEO_BG, ALL_STYLE_V3)
+    const html = renderPage(c, SITE_PATH, { looks, fonts })
+    const body = stripStyle(html)
+    assert.ok(!/<script/i.test(html))
+    assert.ok(!/<(b|i|u)>/.test(html), 'raw tag leaked')
+    assert.deepEqual(dataBlocks(html), c.blocks.map((b) => b.type))
+    assert.equal((body.match(/\sdata-primary(?=[\s>=])/g) || []).length, 1)
+    assert.equal((body.match(/<iframe\b/g) || []).length, 2)
+    const links = linkTags(html).filter((t) => t.kind === 'website' || t.kind === 'custom')
+    assert.deepEqual(links.map((t) => t.href), c.blocks.filter((b) => b.type === 'link').map((b) => esc(b.url)))
+    assert.ok(html.includes('src="/khybrio-tap/hostile-test/logo.svg"'), 'logo')
+    assert.ok(html.includes('src="/khybrio-tap/hostile-test/cover.jpg"'), 'cover')
+    assert.match(html, /<html lang="en" data-bg="video">/)
+    assert.ok(html.includes('<body><div class="kb" aria-hidden="true">'), 'backdrop is the first child of body')
+    assert.equal((html.match(/<video\b/g) || []).length, 1, 'the look adds no video of its own')
+    const colourCss = styleOf(html)
+      .replace(/:root\s*\{[^}]*\}/, '')
+      .replace(/color-mix\((?:[^()]|\([^()]*\))*\)/g, '')
+    assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(colourCss), `hex literal in css: ${colourCss.match(/#[0-9a-fA-F]{3,8}\b/)}`)
+    assert.ok(!/\b(rgb|rgba|hsl|hsla)\(/i.test(colourCss))
+  })
+
+  test(`look "${lookId}": every style value renders, each with every background type`, () => {
+    const backgrounds = [
+      { type: 'color' },
+      { type: 'gradient', stops: [{ ref: 'bg', hex: '#1c4d4a' }, { ref: 'accent', hex: '#e8622d' }], shape: 'linear', angle: 180 },
+      { type: 'image', file: 'cover.jpg', blur: 0, dim: 40, focus: [50, 50] },
+      VIDEO_BG,
+    ]
+    for (const [key, values] of Object.entries(STYLE)) {
+      for (const value of Object.keys(values)) {
+        const bg = backgrounds[(STYLE_KEYS.indexOf(key) + Object.keys(values).indexOf(value)) % backgrounds.length]
+        const c = withV3(everything(lookId), bg, { [key]: value })
+        const html = renderPage(c, SITE_PATH, { looks, fonts })
+        assert.deepEqual(dataBlocks(html), c.blocks.map((b) => b.type), `${key}=${value}`)
+        assert.ok(!/<script/i.test(html), `${key}=${value}`)
+        assert.ok(rootOfPage(html).includes(values[value]) || (value === 'glass' && bg.type === 'video'), `${key}=${value} not on :root`)
+      }
+    }
+  })
+
+  test(`look "${lookId}": a max-limit page with a video background and all style keys stays under 30 KB`, () => {
+    const blocks = []
+    for (let i = 0; i < 20; i++) blocks.push({ type: 'link', kind: 'custom', url: `https://example.com/${i}?q=${'x'.repeat(30)}`, label: 'x'.repeat(40) })
+    for (let i = 0; i < 3; i++) blocks.push({ type: 'video', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
+    for (let i = 0; i < 2; i++) blocks.push({ type: 'socials', items: kindsWhere((k) => k.social).slice(0, 8).map((kind) => ({ kind, url: urlFor(kind) })) })
+    blocks.push({ type: 'heading', text: 'h'.repeat(60) }, { type: 'text', text: 't'.repeat(280) }, { type: 'text', text: 'a\nb\nc\nd\n' + 'e'.repeat(200) }, { type: 'heading', text: 'h'.repeat(60) }, { type: 'text', text: '&'.repeat(280) })
+    const c = withV3(
+      v2(lookId, { tagline: 'x'.repeat(120), logo: 'logo.svg', cover: 'cover.jpg', blocks, branches: [{ name: 'B', address: 'x'.repeat(100), maps: 'https://maps.app.goo.gl/x', hours: '9-9' }] }),
+      VIDEO_BG,
+      ALL_STYLE_V3,
+    )
+    const html = renderPage(c, SITE_PATH, { looks, fonts })
+    assert.ok(Buffer.byteLength(html) < 30 * 1024, `${Buffer.byteLength(html)} bytes`)
+  })
+}
+
+function rootOfPage(html) {
+  return (styleOf(html).match(/:root\s*\{[^}]*\}/) || [''])[0]
+}

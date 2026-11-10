@@ -257,3 +257,155 @@ test('withPreviewCsp: does not match <header> as head', () => {
   const out = withPreviewCsp('<html><body><header>x</header></body></html>')
   assert.ok(out.indexOf('Content-Security-Policy') < out.indexOf('<body>'))
 })
+
+/* ================================================================ v3: background, style, media checks (spec section 7) */
+// Namespace import for the new functions: a missing export fails its own test, not the whole file.
+import * as model from '../studio/editor-model.js'
+
+const MEDIA_LIMITS = { imageMax: 3 * 1024 * 1024, videoMax: 15 * 1024 * 1024, videoWarn: 5 * 1024 * 1024, videoSecondsWarn: 15, videoWidthWarn: 1280 }
+const MB = 1024 * 1024
+const WARN_TEXT = 'Every visitor downloads this on mobile data. Aim for 6-10 s at 720p, under 5 MB, no audio.'
+
+const V2 = {
+  slug: 'cafe', name: 'Cafe', tagline: 'Hi', look: 'menu-board',
+  theme: { bg: '#ffffff', ink: '#000000', accent: '#e8622d' },
+  font: { heading: 'anton', tagline: 'inter', body: 'inter' },
+  blocks: [{ type: 'link', kind: 'phone', url: 'tel:+63917' }],
+  credit: true,
+}
+const withV3 = (extra) => ({ ...V2, ...extra })
+const FIXTURES = {
+  'linear gradient with a hex stop and two style keys': withV3({
+    background: { type: 'gradient', stops: ['bg', '#ff00aa', 'accent'], shape: 'linear', angle: 45 },
+    style: { buttonShape: 'pill', spacing: 'compact' },
+  }),
+  'radial gradient (no angle)': withV3({ background: { type: 'gradient', stops: ['ink', 'bg'], shape: 'radial' } }),
+  'image with blur, dim and focus': withV3({ background: { type: 'image', file: 'photo.png', blur: 6, dim: 55, focus: [20, 80] } }),
+  'video with poster and all eight style keys': withV3({
+    background: { type: 'video', file: 'clip-0123abcd.mp4', poster: 'clip-0123abcd-poster.jpg', blur: 3, dim: 70, focus: [10, 90] },
+    style: { buttonShape: 'square', buttonFill: 'glass', linkLayout: 'grid', align: 'left', logoShape: 'circle', coverShape: 'banner', spacing: 'comfortable', shadow: 'hard' },
+  }),
+  'style only': withV3({ style: { shadow: 'soft' } }),
+}
+
+test('v3 round trip: payload(fromData(x)) deep-equals x', () => {
+  for (const [name, data] of Object.entries(FIXTURES)) {
+    assert.deepEqual(payload(fromData(data, 'cafe', ST, mk)), data, name)
+  }
+})
+
+test('v3 round trip does not alias the input', () => {
+  const data = structuredClone(FIXTURES['video with poster and all eight style keys'])
+  const draft = fromData(data, 'cafe', ST, mk)
+  payload(draft)
+  assert.deepEqual(data, FIXTURES['video with poster and all eight style keys'])
+})
+
+test('payload drops background when the type is color, and when there is none', () => {
+  for (const background of [{ type: 'color' }, undefined]) {
+    const p = payload(fromData(withV3({ background }), 'cafe', ST, mk))
+    assert.equal('background' in p, false)
+  }
+  assert.equal('background' in payload(blankDraft(ST, mk)), false)
+})
+
+test('payload drops angle for a radial gradient even if the data carried one', () => {
+  const p = payload(fromData(withV3({ background: { type: 'gradient', stops: ['bg', 'ink'], shape: 'radial', angle: 90 } }), 'cafe', ST, mk))
+  assert.equal(p.background.shape, 'radial')
+  assert.equal('angle' in p.background, false)
+})
+
+test('payload drops null style keys, and an empty or all-null style entirely', () => {
+  const some = payload(fromData(withV3({ style: { buttonShape: null, shadow: 'soft', align: null } }), 'cafe', ST, mk))
+  assert.deepEqual(some.style, { shadow: 'soft' })
+  for (const style of [{}, { buttonShape: null, shadow: null }, undefined]) {
+    const p = payload(fromData(withV3({ style }), 'cafe', ST, mk))
+    assert.equal('style' in p, false, JSON.stringify(style))
+  }
+  assert.equal('style' in payload(blankDraft(ST, mk)), false)
+})
+
+test('v2 data is untouched: no background or style key appears in the payload', () => {
+  const p = payload(fromData(V2, 'cafe', ST, mk))
+  assert.deepEqual(p, V2)
+})
+
+test('fromData ignores junk background and style without throwing', () => {
+  for (const junk of [{ background: 'red', style: 'pill' }, { background: null, style: null }, { background: [], style: [] }, { background: { type: 7 }, style: { buttonShape: 3 } }]) {
+    assert.doesNotThrow(() => payload(fromData(withV3(junk), 'cafe', ST, mk)), JSON.stringify(junk))
+  }
+})
+
+test('styleControl: a supported key is enabled with no note', () => {
+  const look = { id: 'tiles', label: 'Tiles', supports: ['buttonShape', 'logoShape'], styleDefaults: { buttonShape: 'rounded' } }
+  for (const key of ['buttonShape', 'logoShape']) {
+    const c = model.styleControl(look, key)
+    assert.equal(c.enabled, true, key)
+    assert.ok(!c.note, `${key}: ${c.note}`)
+  }
+})
+
+test('styleControl: an unsupported key is disabled with the look name, the thing it draws, and a pointer to Plain', () => {
+  const look = { id: 'menu-board', label: 'Menu board', supports: ['logoShape'], styleDefaults: {} }
+  const word = { buttonShape: 'buttons', buttonFill: 'buttons', linkLayout: 'layout', align: 'alignment', coverShape: 'cover', spacing: 'spacing', shadow: 'shadows' }
+  for (const [key, w] of Object.entries(word)) {
+    const c = model.styleControl(look, key)
+    assert.equal(c.enabled, false, key)
+    assert.equal(c.note, `Menu board draws its own ${w}. Plain gives full control.`, key)
+  }
+  assert.equal(model.styleControl(look, 'logoShape').enabled, true)
+  assert.equal(model.styleControl({ id: 'receipt', label: 'Receipt', supports: [], styleDefaults: {} }, 'logoShape').note, 'Receipt draws its own logo. Plain gives full control.')
+})
+
+test('styleControl: a look that supports everything enables everything', () => {
+  const all = ['buttonShape', 'buttonFill', 'linkLayout', 'align', 'logoShape', 'coverShape', 'spacing', 'shadow']
+  const plain = { id: 'plain', label: 'Plain', supports: all, styleDefaults: {} }
+  for (const k of all) assert.equal(model.styleControl(plain, k).enabled, true, k)
+})
+
+test('posterTime: min(1, duration / 2) seconds', () => {
+  assert.equal(model.posterTime(10), 1)
+  assert.equal(model.posterTime(2), 1)
+  assert.equal(model.posterTime(1.5), 0.75)
+  assert.equal(model.posterTime(1), 0.5)
+  assert.equal(model.posterTime(0.5), 0.25)
+  assert.equal(model.posterTime(0), 0)
+  assert.equal(model.posterTime(600), 1)
+})
+
+test('videoChecks: a small clip passes clean', () => {
+  const r = model.videoChecks({ size: 2 * MB, duration: 8, width: 1280 }, MEDIA_LIMITS)
+  assert.ok(!r.block)
+  assert.deepEqual(r.warnings, [])
+})
+
+test('videoChecks: over 15 MB blocks, exactly 15 MB does not', () => {
+  assert.ok(model.videoChecks({ size: 15 * MB + 1, duration: 8, width: 720 }, MEDIA_LIMITS).block)
+  assert.ok(!model.videoChecks({ size: 15 * MB, duration: 8, width: 720 }, MEDIA_LIMITS).block)
+})
+
+test('videoChecks: size over 5 MB, longer than 15 s, wider than 1280 px each warn; the boundaries are quiet', () => {
+  const warns = (m) => model.videoChecks({ size: 1 * MB, duration: 8, width: 720, ...m }, MEDIA_LIMITS).warnings
+  assert.deepEqual(warns({ size: 5 * MB }), [])
+  assert.deepEqual(warns({ duration: 15 }), [])
+  assert.deepEqual(warns({ width: 1280 }), [])
+  for (const m of [{ size: 5 * MB + 1 }, { duration: 15.01 }, { width: 1281 }, { size: 9 * MB, duration: 40, width: 1920 }]) {
+    const w = warns(m)
+    assert.ok(w.length >= 1, JSON.stringify(m))
+    assert.ok(w.some((x) => x.includes(WARN_TEXT)), `${JSON.stringify(m)}: ${w}`)
+  }
+})
+
+test('videoChecks: a video over the cap is blocked and may also carry warnings, never a thrown error', () => {
+  assert.doesNotThrow(() => model.videoChecks({ size: 40 * MB, duration: 90, width: 3840 }, MEDIA_LIMITS))
+  const r = model.videoChecks({ size: 40 * MB, duration: 90, width: 3840 }, MEDIA_LIMITS)
+  assert.ok(r.block)
+  assert.ok(Array.isArray(r.warnings))
+})
+
+test('PREVIEW_CSP allows media from self so the preview iframe can play the video', () => {
+  assert.ok(PREVIEW_CSP.includes("media-src 'self'"))
+  assert.ok(withPreviewCsp('<html><head></head></html>').includes("media-src 'self'"))
+  assert.equal(PREVIEW_CSP.includes('unsafe-eval'), false)
+  assert.ok(PREVIEW_CSP.includes("script-src 'none'"))
+})

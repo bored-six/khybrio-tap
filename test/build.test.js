@@ -223,3 +223,84 @@ test('a v1 client.js (links, font.display) builds, and build never rewrites the 
   assert.match(await readFile(join(out, 'old-style', 'index.html'), 'utf8'), /https:\/\/example\.com\/old/)
   assert.equal(await readFile(file, 'utf8'), before)
 })
+
+// ---- v3: background media is copied beside the page (spec section 6) -------------------------
+import { mp4 } from './mp4-fixtures.js'
+
+const VIDEO_BG = { type: 'video', file: 'clip.mp4', poster: 'poster.jpg' }
+
+test('an image background file is copied beside the page', async () => {
+  await addClient('photo-bar', good('photo-bar', { background: { type: 'image', file: 'photo.webp' } }), { 'photo.webp': 'WEBP-BYTES' })
+  const out = join(dir, 'dist')
+  await run(out)
+  assert.equal(await readFile(join(out, 'photo-bar', 'photo.webp'), 'utf8'), 'WEBP-BYTES')
+  assert.match(await readFile(join(out, 'photo-bar', 'index.html'), 'utf8'), /data-bg="image"/)
+})
+
+test('a video background copies the mp4 and its poster, byte for byte', async () => {
+  const video = mp4({ codecs: ['avc1'], faststart: true, mdatBytes: 5000 })
+  await addClient('video-bar', good('video-bar', { background: VIDEO_BG }), { 'clip.mp4': video, 'poster.jpg': 'POSTER' })
+  const out = join(dir, 'dist')
+  await run(out)
+  assert.deepEqual(await readFile(join(out, 'video-bar', 'clip.mp4')), video)
+  assert.equal(await readFile(join(out, 'video-bar', 'poster.jpg'), 'utf8'), 'POSTER')
+  const html = await readFile(join(out, 'video-bar', 'index.html'), 'utf8')
+  assert.match(html, /data-bg="video"/)
+  assert.ok(html.includes('/video-bar/clip.mp4'))
+})
+
+test('a video that is not faststart still builds (it only warns at upload time)', async () => {
+  await addClient('slow-bar', good('slow-bar', { background: VIDEO_BG }), { 'clip.mp4': mp4({ faststart: false }), 'poster.jpg': 'P' })
+  const out = join(dir, 'dist')
+  await run(out)
+  assert.ok(await exists(join(out, 'slow-bar', 'clip.mp4')))
+})
+
+test('files the data does not reference are never copied: old videos, spare images, the poster of a colour page', async () => {
+  await addClient('tidy-bar', good('tidy-bar', { background: VIDEO_BG }), {
+    'clip.mp4': mp4(),
+    'poster.jpg': 'P',
+    'old-deadbeef.mp4': mp4(),
+    'old-deadbeef-poster.jpg': 'OLD',
+    'spare.png': 'SPARE',
+  })
+  const out = join(dir, 'dist')
+  await run(out)
+  assert.deepEqual((await readdir(join(out, 'tidy-bar'))).sort(), ['clip.mp4', 'index.html', 'poster.jpg'])
+})
+
+test('a colour-background page copies no mp4 even when one sits in the folder', async () => {
+  await addClient('plain-bar', good('plain-bar'), { 'leftover.mp4': mp4() })
+  const out = join(dir, 'dist')
+  await run(out)
+  assert.deepEqual(await readdir(join(out, 'plain-bar')), ['index.html'])
+})
+
+test('an HEVC video refuses the whole build, names background.file, writes nothing', async () => {
+  await addClient('fine-one', good('fine-one'))
+  await addClient('hevc-bar', good('hevc-bar', { background: VIDEO_BG }), { 'clip.mp4': mp4({ codecs: ['hvc1'] }), 'poster.jpg': 'P' })
+  const out = join(dir, 'dist')
+  await assert.rejects(run(out), (e) => {
+    assert.match(e.message, /hevc-bar/)
+    assert.match(e.message, /background\.file: This video is HEVC/)
+    assert.ok(!/fine-one/.test(e.message), 'only the broken client is named')
+    return true
+  })
+  assert.ok(!(await exists(out)))
+})
+
+test('an mp4 that is not an mp4 refuses the build on background.file', async () => {
+  await addClient('fake-bar', good('fake-bar', { background: VIDEO_BG }), { 'clip.mp4': 'this is not a video at all, just text', 'poster.jpg': 'P' })
+  await assert.rejects(run(join(dir, 'dist')), /background\.file: /)
+})
+
+test('an mp4 with no moov refuses the build on background.file', async () => {
+  const { ftyp, mdat } = await import('./mp4-fixtures.js')
+  await addClient('noidx-bar', good('noidx-bar', { background: VIDEO_BG }), { 'clip.mp4': Buffer.concat([ftyp(), mdat()]), 'poster.jpg': 'P' })
+  await assert.rejects(run(join(dir, 'dist')), /background\.file: MP4 has no index \(moov\), re-export it/)
+})
+
+test('a missing background file is a validation error from the build too', async () => {
+  await addClient('gone-bar', good('gone-bar', { background: { type: 'image', file: 'gone.png' } }))
+  await assert.rejects(run(join(dir, 'dist')), /background\.file: file "gone\.png" not found in the client folder/)
+})

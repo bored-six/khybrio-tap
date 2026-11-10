@@ -237,7 +237,7 @@ test('missing 404.html in the bucket still gives a 404, not a throw', async () =
 
 test('html responses carry CSP, nosniff, referrer-policy; non-html do not get CSP', async () => {
   const h = (await call('/alpha-cafe/')).res.headers
-  assert.match(h.get('content-security-policy'), /frame-ancestors 'none'$/)
+  assert.match(h.get('content-security-policy'), /frame-ancestors 'none'(;|$)/) // v3 adds media-src 'self'; directive order is not contract
   assert.equal(h.get('referrer-policy'), 'strict-origin-when-cross-origin')
   assert.equal((await call('/fonts/f.woff2')).res.headers.get('content-security-policy'), null)
 })
