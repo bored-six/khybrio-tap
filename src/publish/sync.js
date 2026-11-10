@@ -55,6 +55,12 @@ export async function syncDir({ dir, store, concurrency = 6, force = false }) {
     throw new Error(`Refusing to delete ${pagesGoing} of ${livePages.length} live pages. Publish again with force to allow it.`)
   }
 
+  const isRedirect = (k) => k.startsWith('_redirect/')
+  const redirectsGoing = gone.filter(isRedirect).length
+  if (!force && redirectsGoing > 0 && !keys.some(isRedirect)) {
+    throw new Error(`Refusing to delete ${redirectsGoing} live redirect(s): this build has no _redirect keys (is _redirects.json missing?). Publish again with force to allow it.`)
+  }
+
   const group = (k) => (k.startsWith('_redirect/') ? 1 : k.endsWith('.html') ? 2 : 0)
   const put = (k) => store.put(k, bodies.get(k), metaFor(k))
   for (const g of [0, 1, 2]) await pool(todo.filter((k) => group(k) === g), concurrency, put)

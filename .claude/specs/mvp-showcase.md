@@ -150,7 +150,8 @@ HTML responses add: `content-security-policy: default-src 'none'; style-src 'uns
   via `aws4fetch` (dependency, zero-dep) against `https://{accountId}.r2.cloudflarestorage.com/{bucket}` (S3 API, region `auto`). list = ListObjectsV2, paged, ETag unquoted.
 - `sync.js`: `syncDir({ dir, store, concurrency = 6 }) -> { uploaded:string[], deleted:string[], unchanged:number }`. Upload where md5 differs or key is new:
   non-html first, then `_redirect/*`, then html; deletes last. Never delete keys under `media/`. Refuse (throw, nothing deleted) if dir has 0 pages or it
-  would delete more than `max(3, half)` of the live `*/index.html` keys unless `force:true`.
+  would delete more than `max(3, half)` of the live `*/index.html` keys unless `force:true`. Also refuse (unless force) when
+  the bucket has `_redirect/*` keys, dir has none, and the sync would delete them (a lost `_redirects.json` must not break old cards). Added after review 2026-11-10.
 - `index.js`: `publishLive({ root, site, store, git, force }) -> { ok, output, live:{uploaded,deleted,ms}, backup:'committed'|'nothing'|'failed', push }`.
   Order: write lock -> build to temp dir (failure -> ok:false, zero store calls) -> syncDir -> `git add clients` + commit (sync, local) -> `push` = push Promise (not awaited).
   Git failure never makes ok false. Missing env -> ok:false `Cloudflare is not set up: missing X in .env.local`, no throw.

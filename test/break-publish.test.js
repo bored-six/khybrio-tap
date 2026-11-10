@@ -126,7 +126,8 @@ test('sync guard: force overrides the refusal', async () => {
 })
 test('sync guard: non-page deletions (assets, redirects) do not count toward the page guard', async () => {
   const dir = await tmp('d')
-  await tree(dir, pages(1))
+  // Local keeps one redirect, so the redirect guard (spec 10: never wipe ALL redirects) stays out of the way.
+  await tree(dir, { ...pages(1), '_redirect/yy': 'p0' })
   const junk = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`p0/old${i}.png`, 'x']))
   const s = store({ ...pages(1), ...junk, '_redirect/zz': 'p0' })
   const r = await syncDir({ dir, store: s })
