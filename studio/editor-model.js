@@ -5,6 +5,7 @@ const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i
 const RESERVED = ['assets', 'fonts', '404', 'index', 'api', 'media']
 const str = (v) => (typeof v === 'string' ? v : '')
+const clone = (v) => JSON.parse(JSON.stringify(v))
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
 export const BLOCK_TYPES = [
@@ -100,6 +101,7 @@ export function blankDraft(st, nextId) {
     blocks: [{ id: nextId(), type: 'link', kind: pickId(kinds, 'messenger'), url: '', label: '' }],
     branches: [],
     credit: true,
+    background: null, style: {},
   }
 }
 
@@ -130,6 +132,8 @@ export function fromData(data, slug, st, nextId) {
     blocks: blocks.length ? blocks : [{ id: nextId(), type: 'link', kind: defaultLinkKind(st.kinds), url: '', label: '' }],
     branches: (Array.isArray(d.branches) ? d.branches : []).filter(isObj).map((b) => ({ id: nextId(), name: str(b.name), address: str(b.address), hours: str(b.hours), maps: str(b.maps) })),
     credit: d.credit !== false,
+    background: isObj(d.background) && typeof d.background.type === 'string' ? clone(d.background) : null,
+    style: isObj(d.style) ? Object.fromEntries(Object.entries(d.style).filter(([, v]) => typeof v === 'string')) : {},
   }
 }
 
@@ -163,6 +167,14 @@ export function payload(D) {
     .filter((x) => Object.keys(x).length)
   if (br.length) o.branches = br
   o.credit = D.credit
+  const bg = D.background
+  if (isObj(bg) && bg.type !== 'color') {
+    const b = clone(bg)
+    if (b.type === 'gradient' && b.shape === 'radial') delete b.angle
+    o.background = b
+  }
+  const st = Object.fromEntries(Object.entries(D.style || {}).filter(([, v]) => v !== null && v !== undefined && v !== ''))
+  if (Object.keys(st).length) o.style = st
   return o
 }
 
@@ -216,7 +228,7 @@ export function renameGate({ from, to, dirty }) {
 // The preview iframe runs on the studio origin (it needs allow-same-origin + allow-scripts for the video embeds),
 // so the page inside must not be able to run script or reach out. The meta CSP is placed first in <head>.
 export const PREVIEW_CSP =
-  "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
+  "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; " +
   'frame-src https://www.youtube-nocookie.com https://www.tiktok.com; base-uri \'none\'; form-action \'none\''
 const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`
 export function withPreviewCsp(html) {
@@ -226,4 +238,46 @@ export function withPreviewCsp(html) {
   const root = /<html(?=[\s>])[^>]*>/i.exec(s)
   if (root) return s.slice(0, root.index + root[0].length) + `<head>${CSP_META}</head>` + s.slice(root.index + root[0].length)
   return `<head>${CSP_META}</head>${s}`
+}
+
+/* ---------------------------------------------------------------- v3: style, video, dim */
+const STYLE_WORD = { buttonShape: 'buttons', buttonFill: 'buttons', linkLayout: 'layout', align: 'alignment', logoShape: 'logo', coverShape: 'cover', spacing: 'spacing', shadow: 'shadows' }
+export function styleControl(look, key) {
+  if ((look?.supports || []).includes(key)) return { enabled: true, note: '' }
+  return { enabled: false, note: `${look?.label ?? look?.id ?? 'This look'} draws its own ${STYLE_WORD[key] || key}. Plain gives full control.` }
+}
+
+export const posterTime = (duration) => Math.min(1, (Number(duration) || 0) / 2)
+
+const MEDIA_HINT = 'Every visitor downloads this on mobile data. Aim for 6-10 s at 720p, under 5 MB, no audio.'
+export function videoChecks({ size, duration, width }, media) {
+  const mb = (n) => Math.round((n / 1048576) * 10) / 10
+  const warnings = []
+  if (size > media.videoWarn) warnings.push(`This video is ${mb(size)} MB. ${MEDIA_HINT}`)
+  if (duration > media.videoSecondsWarn) warnings.push(`This video is ${Math.round(duration)} s long. ${MEDIA_HINT}`)
+  if (width > media.videoWidthWarn) warnings.push(`This video is ${width} px wide. ${MEDIA_HINT}`)
+  const block = size > media.videoMax ? `Video is over ${mb(media.videoMax)} MB. Shorten or compress it first.` : ''
+  return { block, warnings }
+}
+
+// Same maths as the server warning (spec section 2): the dim overlay is theme bg at d, so a pixel is d*bg + (1-d)*p.
+const lin = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+const rgb = (hex) => { const h = normHex(hex); return h ? [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) : null }
+const lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+export function worstContrast(ink, bg, dim) {
+  const i = rgb(ink), b = rgb(bg)
+  if (!i || !b) return null
+  const d = dim / 100, li = lum(i)
+  const lo = lum(b.map((x) => d * x)), hi = lum(b.map((x) => d * x + (1 - d)))
+  const r = (a, c) => (Math.max(a, c) + 0.05) / (Math.min(a, c) + 0.05)
+  return li >= lo && li <= hi ? 1 : Math.min(r(li, lo), r(li, hi))
+}
+// Smallest dim 0..100 that keeps the target, or null when the colours cannot (or are invalid).
+export function dimRecommendation(ink, bg, target = 4.5) {
+  for (let d = 0; d <= 100; d++) {
+    const w = worstContrast(ink, bg, d)
+    if (w === null) return null
+    if (w >= target) return d
+  }
+  return null
 }
