@@ -1,10 +1,13 @@
 // Studio API: local dashboard backend. See "Studio" in .claude/specs/contract.md.
 import { createServer } from 'node:http'
 import { readdir, readFile, writeFile, mkdir, rename, rm, stat } from 'node:fs/promises'
+import { createWriteStream, createReadStream } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { once } from 'node:events'
 import { join, dirname, resolve, extname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
-import { validateClient, FILE_RE, LIMITS } from '../validate.js'
+import { validateClient, LIMITS } from '../validate.js'
 import { migrateRaw } from '../migrate.js'
 import { applyRename, readRedirects, writeRedirects } from '../redirects.js'
 import { PALETTES } from '../palettes.js'
@@ -16,7 +19,8 @@ import { looks } from '../looks/index.js'
 import { fonts } from '../fonts.js'
 import { icon } from '../icons.js'
 import { KINDS } from '../kinds.js'
-import { svgProblem } from '../assets.js'
+import { sniff, inspectMp4, MEDIA } from '../assets.js'
+import { STYLE, STYLE_KEYS } from '../style.js'
 import { listClientFolders } from '../build.js'
 import QRCode from 'qrcode'
 
@@ -24,7 +28,11 @@ const here = dirname(fileURLToPath(import.meta.url))
 const studioDir = resolve(here, '../../studio')
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 const MAX_JSON = 256 * 1024
-const MAX_ASSET = 3 * 1024 * 1024
+const MEDIA_RE = /^[a-z0-9][a-z0-9._-]*\.(svg|png|jpe?g|webp|mp4)$/i
+const ORPHAN_RE = /-[0-9a-f]{8}(-poster)?\.(mp4|jpe?g|webp)$/
+const SLOW_START = 'This MP4 starts slowly on phones (index at the end). Re-export with "optimize for web" or "fast start".'
+const mbText = (n) => `${n / (1024 * 1024)} MB`
+let uploadSeq = 0
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -35,6 +43,7 @@ const TYPES = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.woff2': 'font/woff2',
+  '.mp4': 'video/mp4',
 }
 const lookIds = Object.keys(looks)
 const fontIds = Object.keys(fonts)
@@ -99,7 +108,7 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
 
   const filesIn = async (dir) => {
     try {
-      return (await readdir(dir, { withFileTypes: true })).filter((d) => d.isFile()).map((d) => d.name).sort()
+      return (await readdir(dir, { withFileTypes: true })).filter((d) => d.isFile() && !d.name.startsWith('.up-')).map((d) => d.name).sort()
     } catch {
       return []
     }
@@ -165,11 +174,13 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
     }
     return {
       site,
-      looks: Object.entries(looks).map(([id, l]) => ({ id, label: l.label })),
+      looks: Object.entries(looks).map(([id, l]) => ({ id, label: l.label, supports: l.supports, styleDefaults: l.styleDefaults })),
       fonts: Object.entries(fonts).map(([id, f]) => ({ id, family: f.family, group: f.group, body: !!f.body })),
       kinds: Object.entries(KINDS).map(([id, k]) => ({ id, label: k.label ?? '', scheme: k.scheme, social: !!k.social })),
       palettes: PALETTES.map((p) => ({ id: p.id, label: p.label, bg: p.bg, ink: p.ink, accent: p.accent })),
       limits: LIMITS,
+      style: Object.fromEntries(STYLE_KEYS.map((k) => [k, Object.keys(STYLE[k])])),
+      media: MEDIA,
       backup,
       clients,
       pending: await pending(),
@@ -220,6 +231,62 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
       throw new HttpError(500, { error: `rename failed and was undone: ${e.message}` })
     }
     return { ok: true, slug: to }
+  }
+
+  // Delete studio-made hashed media in `dir` that the saved data does not reference. Hand-placed files are never touched.
+  async function removeOrphans(dir, data) {
+    const bg = data?.background && typeof data.background === 'object' ? data.background : {}
+    const used = new Set([data?.logo, data?.cover, bg.file, bg.poster].filter((v) => typeof v === 'string'))
+    for (const f of await filesIn(dir)) if (ORPHAN_RE.test(f) && !used.has(f)) await rm(join(dir, f), { force: true }).catch(() => {})
+  }
+
+  // Stream the request body to a temp file (counter enforces the cap), then sniff, then move into place.
+  async function receiveUpload(req, dir, name) {
+    const ext = extname(name).slice(1)
+    const isVideo = ext === 'mp4'
+    const cap = isVideo ? MEDIA.videoMax : MEDIA.imageMax
+    await mkdir(dir, { recursive: true })
+    const tmp = join(dir, `.up-${process.pid}-${++uploadSeq}`)
+    const out = createWriteStream(tmp)
+    const hash = createHash('md5')
+    let size = 0
+    let over = false
+    let failed = null
+    out.on('error', (e) => { failed = e })
+    try {
+      for await (const chunk of req) {
+        if (over) continue // drain the rest without keeping it
+        size += chunk.length
+        if (size > cap) {
+          over = true
+          continue
+        }
+        hash.update(chunk)
+        if (!out.write(chunk)) await once(out, 'drain').catch(() => {})
+      }
+      out.end()
+      await once(out, 'close')
+      if (failed) throw failed
+      if (over) throw new HttpError(422, { error: `File is over ${mbText(cap)}` })
+      const buf = await readFile(tmp)
+      const warnings = []
+      let final = name
+      if (isVideo) {
+        const r = inspectMp4(buf)
+        if (!r.ok) throw new HttpError(422, { error: r.error })
+        if (!r.faststart) warnings.push(SLOW_START)
+        final = `${name.slice(0, -4)}-${hash.digest('hex').slice(0, 8)}.mp4`
+      } else {
+        const p = sniff(buf, ext)
+        if (p) throw new HttpError(422, { error: p })
+      }
+      await withLock(() => rename(tmp, join(dir, final)))
+      return { file: final, warnings }
+    } catch (e) {
+      out.destroy()
+      await rm(tmp, { force: true }).catch(() => {})
+      throw e
+    }
   }
 
   async function api(req, res, url, send) {
@@ -288,27 +355,16 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
           if (!body.create && !exists) throw new HttpError(404, { error: 'No such client' })
           const r = check(body.data, slug, await filesIn(dir))
           if (!r.ok) return send(422, { ok: false, errors: r.errors, warnings: r.warnings ?? [] })
-          await writeClient(slug, migrateRaw(body.data))
+          const saved = migrateRaw(body.data)
+          await writeClient(slug, saved)
+          await removeOrphans(dir, saved)
           return send(200, { ok: true, warnings: r.warnings ?? [] })
         })
       }
       if (cm[2] && m === 'POST') {
         const name = String(url.searchParams.get('name') ?? '').toLowerCase().replace(/ /g, '-')
-        if (!FILE_RE.test(name) || name.includes('..')) throw new HttpError(422, { error: 'File name must be svg, png, jpg, jpeg or webp (letters, digits, . _ -)' })
-        let buf
-        try {
-          buf = await readBody(req, MAX_ASSET)
-        } catch (e) {
-          if (e.status === 413) throw new HttpError(422, { error: 'File is over 3 MB' })
-          throw e
-        }
-        if (name.endsWith('.svg')) {
-          const p = svgProblem(buf.toString('utf8'))
-          if (p) throw new HttpError(422, { error: p })
-        }
-        await mkdir(dir, { recursive: true })
-        await writeFile(join(dir, name), buf)
-        return send(201, { file: name })
+        if (!MEDIA_RE.test(name) || name.includes('..')) throw new HttpError(422, { error: 'File name must be svg, png, jpg, jpeg, webp or mp4 (letters, digits, . _ -)' })
+        return send(201, await receiveUpload(req, dir, name))
       }
     }
     throw new HttpError(404, { error: 'Not found' })
@@ -317,6 +373,38 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
   async function serveFile(res, file) {
     res.writeHead(200, { 'content-type': TYPES[extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': 'no-store' })
     res.end(await readFile(file))
+  }
+
+  // Single byte range per RFC 7233, same rules as worker/handler.js. null = ignore header, 'bad' = unsatisfiable.
+  function parseRange(header, size) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+    if (!m || (m[1] === '' && m[2] === '')) return null
+    if (m[1] === '') {
+      const n = Number(m[2])
+      if (n === 0 || size === 0) return 'bad'
+      return { start: Math.max(0, size - n), end: size - 1 }
+    }
+    const start = Number(m[1])
+    const end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1)
+    if (start >= size || start > end) return 'bad'
+    return { start, end }
+  }
+
+  async function serveMedia(req, res, file) {
+    const size = (await stat(file)).size
+    const headers = { 'content-type': TYPES[extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': 'no-store', 'accept-ranges': 'bytes' }
+    const header = req.method === 'GET' ? req.headers.range : undefined
+    const r = header ? parseRange(header, size) : null
+    if (r === 'bad') {
+      res.writeHead(416, { ...headers, 'content-range': `bytes */${size}` })
+      return res.end()
+    }
+    const range = r ?? { start: 0, end: size - 1 }
+    res.writeHead(r ? 206 : 200, { ...headers, 'content-length': String(size === 0 ? 0 : range.end - range.start + 1), ...(r ? { 'content-range': `bytes ${r.start}-${r.end}/${size}` } : {}) })
+    if (req.method === 'HEAD' || size === 0) return res.end()
+    const stream = createReadStream(file, range)
+    stream.on('error', () => res.destroy())
+    stream.pipe(res)
   }
 
   const server = createServer(async (req, res) => {
@@ -367,11 +455,11 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
         let full = null
         if (a === 'fonts') {
           for (const f of Object.values(fonts)) for (const ff of f.files) if (ff.file === b) full = ff.path
-        } else if (isSlug(a) && FILE_RE.test(b) && !b.includes('..')) {
+        } else if (isSlug(a) && MEDIA_RE.test(b) && !b.includes('..')) {
           full = join(clientsDir, a, b)
         }
         if (!full || !(await isFile(full))) throw new HttpError(404, 'Not found')
-        return await serveFile(res, full)
+        return extname(full).toLowerCase() === '.mp4' ? await serveMedia(req, res, full) : await serveFile(res, full)
       }
       throw new HttpError(404, 'Not found')
     } catch (e) {
