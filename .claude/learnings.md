@@ -8,3 +8,11 @@ therefore 3:1 (WCAG large text), and looks may only put text on the accent at >=
 GitHub Pages cannot route `/slug` to one app, so every client is a real `slug/index.html`.
 A project repo with a custom domain forwards its old github.io URLs, which is why the main
 Khybrio site stays in `bored-six/Khybrio` (old cards point there).
+
+## 2026-11-10 - Build and dev server
+- Builds go to a temp dir and swap in only on success. Never `rm` outDir before rendering finishes.
+- The dev server rebuilds per request; concurrent requests must share one in-flight build or
+  they delete each other's files mid-write.
+- SVG client assets are served raw on our origin, so the build rejects script, on*= and
+  foreignObject inside them. Facebook/Messenger ignore SVG og:images: real covers should be jpg/webp.
+- Node 24 `node --test test/` treats `test/` as a file; use the glob `"test/*.test.js"`.
