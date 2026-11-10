@@ -99,6 +99,16 @@ const css = () =>
   `.ld{flex:1 1 20px;min-width:20px;height:6px;background:radial-gradient(circle,var(--ink) 1.1px,transparent 1.6px) 0 0/7px 6px repeat-x}` +
   `.it .ic{align-self:center}.dt{max-width:55%;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}` +
   `.dt2{flex-basis:100%;font-weight:600;overflow-wrap:anywhere}.it:active .lb{text-decoration:underline;text-underline-offset:.2em}` +
+  // blocks, board-native: a heading is a centred chalk title over the sign's ornament, text is a
+  // centred note, socials are small round signs like the logo, a video sits in the window's double frame
+  `.bh{margin-top:34px;padding:0 8px;font-size:1.75rem;line-height:1.1;letter-spacing:-.02em;text-align:center}` +
+  `.bh::after{content:"";display:block;width:92px;height:10px;margin:12px auto 0;background:` +
+  `radial-gradient(circle,var(--accent) 3px,transparent 3.5px) 50% 50%/10px 10px no-repeat,` +
+  `linear-gradient(var(--ink),var(--ink)) 0 50%/34px 1.5px no-repeat,linear-gradient(var(--ink),var(--ink)) 100% 50%/34px 1.5px no-repeat}` +
+  `.bt{max-width:32ch;margin:16px auto 0;padding:0 8px;text-align:center;text-wrap:balance}` +
+  `.bs{justify-content:center;gap:14px;margin-top:26px}` +
+  `.bs a{width:52px;height:52px;border:0;background:var(--panel);box-shadow:0 0 0 2px var(--ink)}.bs a:active{background:var(--stripe)}` +
+  `.bv{margin:30px 7px 0}.bv iframe{border-radius:16px;box-shadow:0 0 0 5px var(--bg),0 0 0 7px var(--ink)}` +
   // branches: the hours card
   `.br{margin:40px 20px 0}` +
   `.sh{display:flex;align-items:center;gap:14px;font:700 .8125rem/1 var(--font-body);letter-spacing:.16em;text-transform:uppercase}` +

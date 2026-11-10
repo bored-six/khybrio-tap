@@ -74,3 +74,45 @@ export const BLOCKS =
   `.bs a:active{background:var(--line)}.bs .ic{width:22px;height:22px}` +
   `.bv{margin-top:24px}.bv iframe{display:block;width:100%;height:auto;aspect-ratio:16/9;border:0;border-radius:14px;background:var(--line)}` +
   `.bv.vt iframe{aspect-ratio:9/16;max-width:325px;margin:0 auto}`
+
+// --- Pieces the newer looks share. Markup only: each look styles the classes itself. ---
+
+export const coverHtml = (ctx) =>
+  ctx.client.cover
+    ? `<div class="cv"><img src="${ctx.esc(ctx.asset(ctx.client.cover))}" alt="" width="800" height="600"></div>`
+    : ''
+
+export const logoHtml = (ctx, size) =>
+  ctx.client.logo
+    ? `<img class="lg" src="${ctx.esc(ctx.asset(ctx.client.logo))}" alt="" width="${size}" height="${size}">`
+    : ''
+
+// A link with no trailing arrow: kind icon (wrapped in .k), label, optional phone/email detail.
+// For looks where the row itself reads as tappable (numbered lines, slabs).
+export function plainLink(ctx, b, cls) {
+  const d = detail(b)
+  return (
+    `${linkOpen(ctx, b, cls)}<span class="k">${ctx.icon(b.kind)}</span>` +
+    `<span class="lb">${ctx.esc(b.label)}${d ? `<span class="dt">${detailHtml(ctx, d)}</span>` : ''}</span></a>`
+  )
+}
+
+// section.br > h2.sh + ul > li > h3, p.ad, p.hr (clock + span), a.dir
+export function branchesHtml(ctx) {
+  const { client: c, esc, icon } = ctx
+  if (!c.branches.length) return ''
+  return (
+    `<section class="br"><h2 class="sh">${c.branches.length > 1 ? 'Branches' : 'Find us'}</h2><ul>` +
+    c.branches
+      .map(
+        (b) =>
+          `<li><h3>${esc(b.name)}</h3>` +
+          (b.address ? `<p class="ad">${esc(b.address)}</p>` : '') +
+          (b.hours ? `<p class="hr">${icon('clock')}<span>${esc(b.hours)}</span></p>` : '') +
+          (b.maps ? `<a class="dir" href="${esc(b.maps)}">Directions${icon('out')}</a>` : '') +
+          `</li>`,
+      )
+      .join('') +
+    `</ul></section>`
+  )
+}

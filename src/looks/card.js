@@ -59,7 +59,7 @@ const css = () =>
   `animation:tap 1.6s cubic-bezier(.16,1,.3,1) both}` +
   `@keyframes tap{from{transform:scale(.45);opacity:.3}}` +
   `.hd{position:relative;padding-top:40px}` +
-  `.cv{margin:0 -20px;aspect-ratio:4/3;max-height:240px;overflow:hidden;background:var(--line)}` +
+  `.cv{margin:0 -20px;height:240px;overflow:hidden;background:var(--line)}` +
   `.cv img{display:block;width:100%;height:100%;object-fit:cover}` +
   `.hc::before{display:none}.hc .hd{padding-top:24px}` +
   `.lg{width:88px;height:88px;border-radius:24px;object-fit:contain}` +
@@ -81,6 +81,14 @@ const css = () =>
   `.dt{display:block;margin-top:2px;font-weight:400;font-size:.9375rem;font-variant-numeric:tabular-nums}` +
   `.ar .ic{width:18px;height:18px;display:block;transition:transform .2s}.it:hover .ar .ic{transform:translateX(3px)}` +
   `.it:active{background:var(--line)}` +
+  // blocks, in the card's own voice: a heading starts from a tap point (the accent dot with one
+  // ripple ring), socials are the monogram ring at thumb size, a video takes the button's corner
+  `.bh{display:flex;align-items:baseline;gap:14px;margin-top:38px;font-size:1.6rem;letter-spacing:-.018em}` +
+  `.bh::before{content:"";flex:none;width:10px;height:10px;margin-left:5px;border-radius:50%;background:var(--accent);` +
+  `box-shadow:0 0 0 5px var(--bg),0 0 0 6px var(--ink);transform:translateY(-.12em)}` +
+  `.bt{max-width:34ch;font-size:1.0625rem;line-height:1.5}.bk>.it+.bt,.bk>.it+.bs,.bk>.it+.bv{margin-top:26px}` +
+  `.bs{gap:12px}.bs a{width:52px;height:52px;transition:background .15s}.bs a:active{background:var(--ink);color:var(--bg)}` +
+  `.bv iframe{border-radius:18px;box-shadow:0 0 0 1px var(--line)}` +
   // branches
   `.br{margin-top:40px}.sh{font:var(--heading-weight) 1.5rem/1.1 var(--font-heading);letter-spacing:-.01em;margin-bottom:6px}` +
   `.br li{padding:16px 0;border-bottom:1px solid var(--line)}.br h3{font-size:1.0625rem;font-weight:700;overflow-wrap:anywhere}` +
