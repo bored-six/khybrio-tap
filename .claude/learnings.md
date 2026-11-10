@@ -63,3 +63,13 @@ Khybrio site stays in `bored-six/Khybrio` (old cards point there).
   video would live in git history forever. Cost: R2 + this Mac are the only copies, and CI's real-clients build must skip missing mp4s.
   Publish still uploads them (sync reads dist/, not git).
 - Contrast over photo/video is computable in the worst case (dim overlay is theme bg at known opacity vs a black or white pixel), so it is a warning with numbers, not "impossible".
+
+## 2026-11-11 - v3 findings
+- `fs.createWriteStream` opens its file asynchronously. If the request dies first, `rm(tmp)` runs before the file
+  exists and the open creates it afterwards. Always `destroy()` then await the stream's 'close' before removing.
+- Most page weight was repeated markup, not CSS: an inline arrow `<svg>` on every link cost ~2 KB at the limit.
+  Draw repeated glyphs once in CSS (clip-path, since the page CSP blocks data: images).
+- Duplicate maths lives in studio/editor-model.js (dimRecommendation) and src/color.js (minDim) because the studio
+  file must stay browser-standalone. test/break-v3-pure.test.js pins their parity; change both together.
+- Four agent-written tests could never pass (regex stopping inside var(), eps 0, wrong credit host, old fixture).
+  When a test can't pass by construction, fix the test's mechanism, never its expectation.
