@@ -328,7 +328,14 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
       })
       return { file: final, warnings }
     } catch (e) {
-      out.destroy()
+      // createWriteStream opens the file asynchronously: if the request died before the open finished,
+      // rm() would run first and the open would then recreate the temp file. Wait for the stream to
+      // close (destroy() defers the close until the open completes) before removing it.
+      if (!out.closed) {
+        const closed = once(out, 'close').catch(() => {})
+        out.destroy()
+        await closed
+      }
       await rm(tmp, { force: true }).catch(() => {})
       throw e
     }
