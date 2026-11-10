@@ -1,0 +1,7 @@
+name = "khybrio-tap"
+main = "worker/index.js"
+compatibility_date = "2025-01-01"
+
+[[r2_buckets]]
+binding = "TAP"
+bucket_name = "khybrio-tap"
