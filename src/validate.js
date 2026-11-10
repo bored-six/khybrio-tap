@@ -4,7 +4,7 @@ import { STYLE, STYLE_KEYS } from './style.js'
 import { migrateRaw } from './migrate.js'
 import { parseVideo, embedSrc } from './embed.js'
 
-export const LIMITS = { blocks: 30, links: 20, videos: 3, socials: 2, socialItems: 8, heading: 60, text: 280, label: 40 }
+export const LIMITS = { blocks: 30, links: 20, videos: 3, socials: 2, socialItems: 8, heading: 60, text: 280, label: 40, branches: 6, branchName: 40, branchAddress: 80, branchHours: 40 }
 const BLOCK_TYPES = ['link', 'heading', 'text', 'socials', 'video']
 const BLOCK_KEYS = { link: ['type', 'kind', 'url', 'label'], heading: ['type', 'text'], text: ['type', 'text'], socials: ['type', 'items'], video: ['type', 'url'] }
 const ALLOWED = ['slug', 'name', 'tagline', 'look', 'theme', 'font', 'logo', 'cover', 'blocks', 'branches', 'credit', 'background', 'style']
@@ -296,17 +296,19 @@ export function validateClient(input, { folder, looks = [], fonts = [], bodyFont
   // branches
   const branches = []
   if (raw.branches !== undefined) {
-    if (!Array.isArray(raw.branches) || raw.branches.length > 10) err('branches: must be an array of at most 10')
+    if (!Array.isArray(raw.branches) || raw.branches.length > LIMITS.branches) err(`branches: must be an array of at most ${LIMITS.branches}`)
     else
       raw.branches.forEach((b, i) => {
         const p = `branches[${i}]`
         if (!isObj(b)) return err(`${p}: must be an object`)
         const out = { name: null, address: null, maps: null, hours: null }
         if (!isStr(b.name) || !b.name.trim()) err(`${p}.name: required`)
+        else if (b.name.trim().length > LIMITS.branchName) err(`${p}.name: at most ${LIMITS.branchName} characters`)
         else out.name = b.name.trim()
-        for (const k of ['address', 'hours']) {
+        for (const [k, max] of [['address', LIMITS.branchAddress], ['hours', LIMITS.branchHours]]) {
           if (b[k] === undefined || b[k] === null) continue
           if (!isStr(b[k])) err(`${p}.${k}: must be a string`)
+          else if (b[k].length > max) err(`${p}.${k}: at most ${max} characters`)
           else out[k] = b[k]
         }
         if (b.maps !== undefined && b.maps !== null) {

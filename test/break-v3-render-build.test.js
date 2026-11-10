@@ -9,7 +9,7 @@ import { looks } from '../src/looks/index.js'
 import { fonts } from '../src/fonts.js'
 import { icon } from '../src/icons.js'
 import { KINDS } from '../src/kinds.js'
-import { validateClient, validateSite } from '../src/validate.js'
+import { validateClient, validateSite, LIMITS } from '../src/validate.js'
 import { renderPage } from '../src/render.js'
 import { build } from '../src/build.js'
 import { STYLE, STYLE_KEYS } from '../src/style.js'
@@ -48,7 +48,7 @@ function worst(lookId, o = {}) {
     slug, name: 'x'.repeat(60), tagline: 'x'.repeat(120), look: lookId,
     font: { heading: 'ibm-plex-mono', tagline: 'space-mono', body: 'bricolage-grotesque' },
     theme: THEME, logo: BIG[0], cover: BIG[1], blocks: maxBlocks(),
-    branches: Array.from({ length: o.branches ?? 1 }, () => ({ name: 'x'.repeat(30), address: 'x'.repeat(100), maps: 'https://maps.app.goo.gl/x', hours: '9-9' })),
+    branches: Array.from({ length: o.branches ?? 1 }, () => ({ name: 'x'.repeat(LIMITS.branchName), address: 'x'.repeat(LIMITS.branchAddress), maps: 'https://maps.app.goo.gl/x', hours: 'x'.repeat(LIMITS.branchHours) })),
     background: VIDEO(40), style: ALL, ...o.extra,
   }
   const res = validate(raw, BIG, slug)
@@ -67,7 +67,7 @@ for (const id of LOOK_IDS) {
 
 for (const id of LOOK_IDS) {
   test(`size: look "${id}" with the 10 branches the validator allows, video bg and all 8 style keys stays under 30 KB (contract: page HTML < 30 KB)`, () => {
-    const bytes = Buffer.byteLength(page(worst(id, { branches: 10, slug: 'demo-shop', extra: { background: VIDEO(5) } })))
+    const bytes = Buffer.byteLength(page(worst(id, { branches: LIMITS.branches, slug: 'demo-shop', extra: { background: VIDEO(5) } })))
     assert.ok(bytes < 30 * 1024, `${bytes} of ${30 * 1024}`)
   })
 }

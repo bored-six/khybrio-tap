@@ -73,7 +73,8 @@ export function inspectMp4(buf) {
   const moov = top.find((b) => b.type === 'moov')
   if (!moov) return { ok: false, error: 'MP4 has no index (moov), re-export it' }
   const mdat = top.find((b) => b.type === 'mdat')
-  const faststart = !mdat || moov.start < mdat.start
+  if (!mdat) return { ok: false, error: 'This MP4 is incomplete (no video data). Re-export it and upload again' }
+  const faststart = moov.start < mdat.start
   const codecs = sampleEntries(buf, moov)
   if (codecs.some((c) => c === 'avc1' || c === 'avc3')) return { ok: true, faststart }
   if (codecs.some((c) => c === 'hvc1' || c === 'hev1')) {

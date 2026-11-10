@@ -205,3 +205,9 @@ After 6.1: regression-verifier, then reviewer. Builder commits per task, stages 
 **User must decide (task 1.4):** the repo is public and Publish commits `clients/` as the backup. (A) commit mp4s: full backup, every replaced video stays in
 git history forever (8 MB cap bounds it). (B) git-ignore `clients/**/*.mp4`: R2 is the only copy besides this Mac, and CI's "real clients build" test must skip
 missing mp4s. Recommended: A while there are under ~10 video pages; revisit at 300 MB repo size.
+
+## Contract change 2026-11-11: branch limits and upload safety
+- Branches: max 6 (was 10); `name` <= 40, `address` <= 80, `hours` <= 40 chars. Added to `LIMITS` (`branches`, `branchName`, `branchAddress`, `branchHours`). Reason: branches had no caps, so the 30 KB page budget could be broken.
+- Orphans: replaced the filename-regex cleanup. The server records every upload in `<root>/.studio/uploads.json` (`{ slug: { file: uploadedAtMs } }`, atomic write, gitignored). On save it deletes only files that are in the manifest, not referenced by the saved logo/cover/background file/poster, and uploaded more than 1 hour ago. Hand-placed files are never touched.
+- Uploads: zero-byte files are rejected with 422. `inspectMp4` requires an `mdat` box (a file cut after `moov` is rejected); box sizes must fit the file.
+- Build: the `client.js` import cache-buster is `Date.now()-Math.random()`.

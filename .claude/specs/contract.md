@@ -74,7 +74,7 @@ validateClient(raw, { folder, looks, fonts, bodyFonts = fonts, files })  // -> {
 //   looks: string[] of allowed look ids, fonts: string[] of font ids, bodyFonts: ids with body:true,
 //   files: string[] of file names present in the client folder. Calls migrateRaw first.
 //   warnings is always an array, also when ok is false.
-LIMITS                   // { blocks:30, links:20, videos:3, socials:2, socialItems:8, heading:60, text:280, label:40 }
+LIMITS                   // { blocks:30, links:20, videos:3, socials:2, socialItems:8, heading:60, text:280, label:40, branches:6, branchName:40, branchAddress:80, branchHours:40 }
 
 // src/render.js
 renderPage(client, site, { looks, fonts })  // -> full HTML string (v2: blocks, three fonts)
@@ -145,7 +145,7 @@ e.g. `links[2].url: ...`, `theme.ink: ...`, `slug: ...`.
     equals the kind's scheme. (`javascript:`, `http:`, `data:` all rejected.)
   - `label`: optional, non-empty, <= 40 chars; default `KINDS[kind].label`.
   - `socials.items[j].kind` must have `social: true`. `video.url` goes through `parseVideo`.
-- `branches`: optional array <= 10. `name` required. `maps` if present must be `https:`.
+- `branches`: optional array <= 6 (was 10; changed 2026-11-11 so the worst-case page stays under 30 KB). `name` required <= 40 chars, `address` <= 80, `hours` <= 40; errors are path-prefixed like the other limits. `maps` if present must be `https:`.
 - `credit`: optional boolean.
 
 ## validateSite

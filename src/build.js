@@ -46,7 +46,7 @@ export async function build({ root, outDir, site, looks, fonts, allowMissingVide
     const dir = join(clientsDir, folder)
     let raw
     try {
-      raw = (await import(`${pathToFileURL(join(dir, 'client.js')).href}?v=${Date.now()}`)).default
+      raw = (await import(`${pathToFileURL(join(dir, 'client.js')).href}?v=${Date.now()}-${Math.random()}`)).default
     } catch (e) {
       problems.push(`${folder}:\n  - client.js could not be loaded: ${e.message}`)
       continue

@@ -29,7 +29,7 @@ const studioDir = resolve(here, '../../studio')
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 const MAX_JSON = 256 * 1024
 const MEDIA_RE = /^[a-z0-9][a-z0-9._-]*\.(svg|png|jpe?g|webp|mp4)$/i
-const ORPHAN_RE = /-[0-9a-f]{8}(-poster)?\.(mp4|jpe?g|webp)$/
+const ORPHAN_AGE_MS = 60 * 60 * 1000
 const SLOW_START = 'This MP4 starts slowly on phones (index at the end). Re-export with "optimize for web" or "fast start".'
 const mbText = (n) => `${n / (1024 * 1024)} MB`
 let uploadSeq = 0
@@ -230,18 +230,57 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
       } catch {}
       throw new HttpError(500, { error: `rename failed and was undone: ${e.message}` })
     }
+    try {
+      const manifest = await readManifest()
+      if (manifest[from]) {
+        manifest[to] = { ...(manifest[to] ?? {}), ...manifest[from] }
+        delete manifest[from]
+        await writeManifest(manifest)
+      }
+    } catch {}
     return { ok: true, slug: to }
   }
 
-  // Delete studio-made hashed media in `dir` that the saved data does not reference. Hand-placed files are never touched.
-  async function removeOrphans(dir, data) {
+  // Upload manifest: <root>/.studio/uploads.json = { slug: { file: uploadedAtMs } }. Only files listed here are ever cleaned up.
+  const manifestFile = join(root, '.studio', 'uploads.json')
+  async function readManifest() {
+    try {
+      const m = JSON.parse(await readFile(manifestFile, 'utf8'))
+      return m && typeof m === 'object' && !Array.isArray(m) ? m : {}
+    } catch {
+      return {}
+    }
+  }
+  async function writeManifest(m) {
+    await mkdir(dirname(manifestFile), { recursive: true })
+    await writeText(manifestFile, JSON.stringify(m, null, 2) + '\n')
+  }
+
+  // Delete files that (a) the server wrote via upload, (b) the saved data no longer references, (c) are over an hour old.
+  // Anything not in the manifest (hand-placed files) is never touched.
+  async function removeOrphans(slug, dir, data) {
+    const manifest = await readManifest()
+    const entries = manifest[slug]
+    if (!entries || typeof entries !== 'object') return
     const bg = data?.background && typeof data.background === 'object' ? data.background : {}
     const used = new Set([data?.logo, data?.cover, bg.file, bg.poster].filter((v) => typeof v === 'string'))
-    for (const f of await filesIn(dir)) if (ORPHAN_RE.test(f) && !used.has(f)) await rm(join(dir, f), { force: true }).catch(() => {})
+    const cutoff = Date.now() - ORPHAN_AGE_MS
+    let changed = false
+    for (const [f, at] of Object.entries(entries)) {
+      if (!MEDIA_RE.test(f) || f.includes('..') || f === 'client.js') continue // never a path, never anything we would not have written
+      if (used.has(f) || typeof at !== 'number' || at > cutoff) continue
+      await rm(join(dir, f), { force: true }).catch(() => {})
+      delete entries[f]
+      changed = true
+    }
+    if (changed) {
+      if (!Object.keys(entries).length) delete manifest[slug]
+      await writeManifest(manifest)
+    }
   }
 
   // Stream the request body to a temp file (counter enforces the cap), then sniff, then move into place.
-  async function receiveUpload(req, dir, name) {
+  async function receiveUpload(req, dir, name, slug) {
     const ext = extname(name).slice(1)
     const isVideo = ext === 'mp4'
     const cap = isVideo ? MEDIA.videoMax : MEDIA.imageMax
@@ -268,6 +307,7 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
       await once(out, 'close')
       if (failed) throw failed
       if (over) throw new HttpError(422, { error: `File is over ${mbText(cap)}` })
+      if (size === 0) throw new HttpError(422, { error: 'File is empty' })
       const buf = await readFile(tmp)
       const warnings = []
       let final = name
@@ -280,7 +320,12 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
         const p = sniff(buf, ext)
         if (p) throw new HttpError(422, { error: p })
       }
-      await withLock(() => rename(tmp, join(dir, final)))
+      await withLock(async () => {
+        await rename(tmp, join(dir, final))
+        const manifest = await readManifest()
+        manifest[slug] = { ...(manifest[slug] ?? {}), [final]: Date.now() }
+        await writeManifest(manifest)
+      })
       return { file: final, warnings }
     } catch (e) {
       out.destroy()
@@ -357,14 +402,14 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
           if (!r.ok) return send(422, { ok: false, errors: r.errors, warnings: r.warnings ?? [] })
           const saved = migrateRaw(body.data)
           await writeClient(slug, saved)
-          await removeOrphans(dir, saved)
+          await removeOrphans(slug, dir, saved)
           return send(200, { ok: true, warnings: r.warnings ?? [] })
         })
       }
       if (cm[2] && m === 'POST') {
         const name = String(url.searchParams.get('name') ?? '').toLowerCase().replace(/ /g, '-')
         if (!MEDIA_RE.test(name) || name.includes('..')) throw new HttpError(422, { error: 'File name must be svg, png, jpg, jpeg, webp or mp4 (letters, digits, . _ -)' })
-        return send(201, await receiveUpload(req, dir, name))
+        return send(201, await receiveUpload(req, dir, name, slug))
       }
     }
     throw new HttpError(404, { error: 'Not found' })
