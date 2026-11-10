@@ -16,3 +16,10 @@ Khybrio site stays in `bored-six/Khybrio` (old cards point there).
 - SVG client assets are served raw on our origin, so the build rejects script, on*= and
   foreignObject inside them. Facebook/Messenger ignore SVG og:images: real covers should be jpg/webp.
 - Node 24 `node --test test/` treats `test/` as a file; use the glob `"test/*.test.js"`.
+
+## 2026-11-10 - Studio
+- The studio is a localhost write server: every /api call needs the `x-khybrio-studio` header and a
+  local Origin, so another website open in the browser cannot make it write files or push.
+- Uploading an image for a never-saved page leaves a folder with no client.js. Build and studio both
+  skip such folders (`listClientFolders`), otherwise Publish would push a folder that breaks CI.
+- Studio saves rewrite client.js as plain JSON, so hand-written comments in client.js are lost on save.

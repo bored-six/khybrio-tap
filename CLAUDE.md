@@ -16,10 +16,11 @@ do not apply here. The global `~/.claude/CLAUDE.md` does.
   Fraunces for display, Inter for body. No emojis, no stock icon packs: icons are hand-made in `src/icons.js`.
 - Real client details go in only with the client's written permission (same rule as the main site).
 
-## Adding a client
-1. Copy `clients/demo-cafe/` to `clients/<slug>/` (folder name = slug).
-2. Edit `client.js`, drop the logo/cover files beside it.
-3. `npm run build`. It refuses to build and lists every problem if anything is wrong.
+## Adding or editing a client
+Easiest: `npm run studio`, open http://localhost:4322/, click New page (or Edit), Save, then Publish live.
+By hand: copy `clients/demo-cafe/` to `clients/<slug>/`, edit `client.js`, `npm run build` to check.
+The studio runs only on this Mac and has no login yet (planned: Supabase, admin-managed accounts).
 
 ## Commands
 - `npm test`, `npm run build`, `npm run dev` (serves `dist/` at http://localhost:4321/khybrio-tap/)
+- `npm run studio` (dashboard at http://localhost:4322/)
