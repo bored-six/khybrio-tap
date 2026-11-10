@@ -6,6 +6,7 @@ import masthead from './masthead.js'
 import poster from './poster.js'
 import tiles from './tiles.js'
 import receipt from './receipt.js'
+import plain from './plain.js'
 
 export const looks = {
   card,
@@ -14,4 +15,5 @@ export const looks = {
   poster,
   tiles,
   receipt,
+  plain,
 }
