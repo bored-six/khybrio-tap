@@ -9,7 +9,7 @@ import { looks } from '../src/looks/index.js'
 import { fonts } from '../src/fonts.js'
 import { icon } from '../src/icons.js'
 import { KINDS } from '../src/kinds.js'
-import { validateClient } from '../src/validate.js'
+import { validateClient, LIMITS } from '../src/validate.js'
 import { renderPage } from '../src/render.js'
 import { build } from '../src/build.js'
 import { SITE, SITE_SUBPATH, linkTags } from './helpers.js'
@@ -210,7 +210,7 @@ for (const lookId of Object.keys(looks)) {
     for (let i = 0; i < 2; i++) blocks.push({ type: 'socials', items: kindsWhere((k) => k.social).slice(0, 8).map((kind) => ({ kind, url: urlFor(kind) })) })
     blocks.push({ type: 'heading', text: 'h'.repeat(60) }, { type: 'text', text: 't'.repeat(280) }, { type: 'text', text: 'a\nb\nc\nd\n' + 'e'.repeat(200) }, { type: 'heading', text: 'h'.repeat(60) }, { type: 'text', text: '&'.repeat(280) })
     assert.equal(blocks.length, 30)
-    const c = v2(lookId, { tagline: 'x'.repeat(120), logo: 'logo.svg', cover: 'cover.jpg', blocks, branches: [{ name: 'B', address: 'x'.repeat(100), maps: 'https://maps.app.goo.gl/x', hours: '9-9' }] })
+    const c = v2(lookId, { tagline: 'x'.repeat(120), logo: 'logo.svg', cover: 'cover.jpg', blocks, branches: Array.from({ length: LIMITS.branches }, () => ({ name: 'x'.repeat(LIMITS.branchName), address: 'x'.repeat(LIMITS.branchAddress), maps: 'https://maps.app.goo.gl/x', hours: 'x'.repeat(LIMITS.branchHours) })) })
     const html = render(c)
     assert.ok(Buffer.byteLength(html) < 30 * 1024, `${Buffer.byteLength(html)} bytes`)
   })
@@ -376,7 +376,7 @@ for (const lookId of Object.keys(looks)) {
     for (let i = 0; i < 2; i++) blocks.push({ type: 'socials', items: kindsWhere((k) => k.social).slice(0, 8).map((kind) => ({ kind, url: urlFor(kind) })) })
     blocks.push({ type: 'heading', text: 'h'.repeat(60) }, { type: 'text', text: 't'.repeat(280) }, { type: 'text', text: 'a\nb\nc\nd\n' + 'e'.repeat(200) }, { type: 'heading', text: 'h'.repeat(60) }, { type: 'text', text: '&'.repeat(280) })
     const c = withV3(
-      v2(lookId, { tagline: 'x'.repeat(120), logo: 'logo.svg', cover: 'cover.jpg', blocks, branches: [{ name: 'B', address: 'x'.repeat(100), maps: 'https://maps.app.goo.gl/x', hours: '9-9' }] }),
+      v2(lookId, { tagline: 'x'.repeat(120), logo: 'logo.svg', cover: 'cover.jpg', blocks, branches: Array.from({ length: LIMITS.branches }, () => ({ name: 'x'.repeat(LIMITS.branchName), address: 'x'.repeat(LIMITS.branchAddress), maps: 'https://maps.app.goo.gl/x', hours: 'x'.repeat(LIMITS.branchHours) })) }),
       VIDEO_BG,
       ALL_STYLE_V3,
     )

@@ -23,7 +23,7 @@ const deepFreeze = (o) => { if (o && typeof o === 'object') { Object.values(o).f
 
 // ---- LIMITS: exactly at and one over ----
 test('LIMITS values are the spec numbers', () => {
-  assert.deepEqual(LIMITS, { blocks: 30, links: 20, videos: 3, socials: 2, socialItems: 8, heading: 60, text: 280, label: 40 })
+  assert.deepEqual(LIMITS, { blocks: 30, links: 20, videos: 3, socials: 2, socialItems: 8, heading: 60, text: 280, label: 40, branches: 6, branchName: 40, branchAddress: 80, branchHours: 40 })
 })
 test('blocks: 30 ok, 31 error, 0 error', () => {
   assert.equal(V({ blocks: Array.from({ length: 30 }, (_, i) => (i < 20 ? link(i) : { type: 'heading', text: 'h' })) }).ok, true)
@@ -87,14 +87,19 @@ test('custom link label: 40 ok, 41 error, whitespace-only error, required for cu
   bad(c(5), 'blocks[0].label')
   bad(blk({ type: 'link', kind: 'website', url: 'https://e.co', label: 'x'.repeat(41) }), 'blocks[0].label')
 })
-test('name 60 ok / 61 error, tagline 120 ok / 121 error, branches 10 ok / 11 error, slug 2 and 40', () => {
+test('name 60 ok / 61 error, tagline 120 ok / 121 error, branches LIMITS.branches ok / +1 error, slug 2 and 40', () => {
   assert.equal(V({ name: 'n'.repeat(60) }).ok, true)
   bad(V({ name: 'n'.repeat(61) }), 'name')
   assert.equal(V({ tagline: 't'.repeat(120) }).ok, true)
   bad(V({ tagline: 't'.repeat(121) }), 'tagline')
   const br = (n) => Array.from({ length: n }, (_, i) => ({ name: `b${i}` }))
-  assert.equal(V({ branches: br(10) }).ok, true)
-  bad(V({ branches: br(11) }), 'branches')
+  assert.equal(V({ branches: br(LIMITS.branches) }).ok, true)
+  bad(V({ branches: br(LIMITS.branches + 1) }), 'branches')
+  const one = (f, n) => V({ branches: [{ name: 'b', [f]: 'x'.repeat(n) }] })
+  for (const [f, k] of [['name', 'branchName'], ['address', 'branchAddress'], ['hours', 'branchHours']]) {
+    assert.equal(one(f, LIMITS[k]).ok, true, f)
+    bad(one(f, LIMITS[k] + 1), `branches[0].${f}`)
+  }
   for (const s of ['ab', 'a'.repeat(40)]) assert.equal(V({ slug: s }, { folder: s }).ok, true, s)
   for (const s of ['a', 'a'.repeat(41)]) bad(V({ slug: s }, { folder: s }), 'slug')
 })
@@ -325,7 +330,7 @@ function hostileClient(lookId) {
         { type: 'socials', items: [{ kind: 'facebook', url: 'https://f.co/"><zzmark>' }, { kind: 'phone', url: 'tel:+63917"><zzmark>' }, { kind: 'email', url: 'mailto:a@b.co?subject="><zzmark>' }] },
         { type: 'video', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&x="><zzmark>' },
       ],
-      branches: [{ name: `${MARK}${BREAK}`, address: `${MARK}${BREAK}`, hours: `${MARK}${BREAK}`, maps: 'https://maps.co/"><zzmark>' }],
+      branches: [{ name: `${MARK}${BREAK}`.slice(0, LIMITS.branchName), address: `${MARK}${BREAK}`.slice(0, LIMITS.branchAddress), hours: `${MARK}${BREAK}`.slice(0, LIMITS.branchHours), maps: 'https://maps.co/"><zzmark>' }],
     }),
     OPTS,
   )

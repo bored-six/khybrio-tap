@@ -180,10 +180,12 @@ test('mp4: a stsd entry with an absurd entry count / sample entry size past its 
   assert.equal(r.ok, false)
 })
 
-test('mp4: faststart is false only when mdat precedes moov; no mdat counts as faststart', () => {
+test('mp4: faststart is false only when mdat precedes moov; a file with no mdat is rejected outright', () => {
   assert.equal(inspectMp4(mp4({ faststart: false })).faststart, false)
   assert.equal(inspectMp4(mp4({ faststart: true })).faststart, true)
-  assert.equal(inspectMp4(Buffer.concat([ftyp(), moov()])).faststart, true)
+  const noMdat = inspectMp4(Buffer.concat([ftyp(), moov(['avc1'])]))
+  assert.equal(noMdat.ok, false)
+  assert.equal(noMdat.faststart, undefined)
 })
 
 /* ================================================================ 4. worker Range */

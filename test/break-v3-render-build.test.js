@@ -66,7 +66,7 @@ for (const id of LOOK_IDS) {
 }
 
 for (const id of LOOK_IDS) {
-  test(`size: look "${id}" with the 10 branches the validator allows, video bg and all 8 style keys stays under 30 KB (contract: page HTML < 30 KB)`, () => {
+  test(`size: look "${id}" with the max branches the validator allows, video bg and all 8 style keys stays under 30 KB (contract: page HTML < 30 KB)`, () => {
     const bytes = Buffer.byteLength(page(worst(id, { branches: LIMITS.branches, slug: 'demo-shop', extra: { background: VIDEO(5) } })))
     assert.ok(bytes < 30 * 1024, `${bytes} of ${30 * 1024}`)
   })
@@ -102,7 +102,7 @@ for (const id of LOOK_IDS) {
           { type: 'link', kind: 'custom', url: 'https://example.com/?q=%3C/style%3E', label: bad.slice(0, 40) },
           { type: 'text', text: bad },
         ],
-        branches: [{ name: bad, address: bad, maps: 'https://maps.app.goo.gl/x?a=</style>', hours: bad }],
+        branches: [{ name: bad.slice(0, LIMITS.branchName), address: bad.slice(0, LIMITS.branchAddress), maps: 'https://maps.app.goo.gl/x?a=</style>', hours: bad.slice(0, LIMITS.branchHours) }],
         background: { type: 'video', file: BIG[3], poster: BIG[2], blur: 3, dim: 50, focus: [10, 90] },
         style: ALL,
       }

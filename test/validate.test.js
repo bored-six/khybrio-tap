@@ -48,7 +48,7 @@ test('KINDS covers the v1 and v2 kinds with the right schemes and social flags',
 })
 
 test('LIMITS is exported exactly as specified', () => {
-  assert.deepEqual(LIMITS, { blocks: 30, links: 20, videos: 3, socials: 2, socialItems: 8, heading: 60, text: 280, label: 40 })
+  assert.deepEqual(LIMITS, { blocks: 30, links: 20, videos: 3, socials: 2, socialItems: 8, heading: 60, text: 280, label: 40, branches: 6, branchName: 40, branchAddress: 80, branchHours: 40 })
 })
 
 test('all errors are collected, each prefixed with its field path', () => {

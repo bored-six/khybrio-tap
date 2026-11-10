@@ -33,8 +33,19 @@ after(async () => {
 })
 beforeEach(async () => {
   await rm(join(root, 'clients'), { recursive: true, force: true })
+  await rm(join(root, '.studio'), { recursive: true, force: true })
   await mkdir(dirOf(), { recursive: true })
 })
+// Orphan contract (2026-11-11): only files in <root>/.studio/uploads.json ({ slug: { file: uploadedAtMs } }),
+// unreferenced, uploaded over 1 hour ago, are deleted. Everything else (hand-placed) is never touched.
+const HOUR = 60 * 60 * 1000
+const track = async (names, ageMs = 2 * HOUR, slug = SLUG) => {
+  const p = join(root, '.studio', 'uploads.json')
+  const m = await readFile(p, 'utf8').then(JSON.parse, () => ({}))
+  m[slug] = { ...m[slug], ...Object.fromEntries(names.map((n) => [n, Date.now() - ageMs])) }
+  await mkdir(join(root, '.studio'), { recursive: true })
+  await writeFile(p, JSON.stringify(m))
+}
 
 const upload = (name, body, slug = SLUG) =>
   fetch(`${base}/api/clients/${slug}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', headers: H, body })
@@ -171,7 +182,10 @@ test('upload: path tricks in ?name= are refused and write nothing outside the cl
   }
   const escapes = (await readdir(join(root, 'clients'))).filter((f) => f !== SLUG)
   assert.deepEqual(escapes, [], 'something was written next to the client folder')
-  assert.deepEqual(await readdir(root).then((l) => l.filter((f) => f !== 'clients')), [], 'something was written in the root')
+  // the studio may create its own gitignored .studio/ (upload manifest) at the root; nothing else
+  assert.deepEqual(await readdir(root).then((l) => l.filter((f) => f !== 'clients' && f !== '.studio')), [], 'something was written in the root')
+  const stray = await readdir(join(root, '.studio')).catch(() => [])
+  assert.deepEqual(stray.filter((f) => f !== 'uploads.json'), [], 'something other than the manifest was written in .studio')
   assert.deepEqual((await ls()).filter((f) => f !== 'client.js'), [])
 })
 
@@ -303,29 +317,37 @@ test('upload: concurrent uploads while a slow one is mid-stream do not block or 
 
 /* ---------------------------------------------------------------- orphans */
 
-test('orphans: PUT keeps files still referenced by logo, cover, background.file and background.poster (hashed names) and deletes unreferenced hashed ones', async () => {
-  const keep = ['logo-aaaaaaaa.jpg', 'cover-bbbbbbbb.webp', 'clip-cccccccc.mp4', 'clip-cccccccc-poster.jpg']
-  const drop = ['old-dddddddd.mp4', 'old-dddddddd-poster.jpg', 'x-eeeeeeee.jpeg', 'y-ffffffff.webp']
-  const hand = ['hand-placed.jpg', 'team.webp', 'promo.mp4', 'logo.svg', 'clip-poster.jpg', 'clip-cccccccz.mp4', 'a-ABCDEF12.jpg', 'a-1234567.jpg', 'a-123456789.png']
+test('orphans: PUT keeps referenced files and deletes tracked, aged, unreferenced ones; hand-placed files (even hashed-looking) survive', async () => {
+  const keep = ['logo-aaaaaaaa.jpg', 'cover-bbbbbbbb.webp', 'clip-cccccccc.mp4', 'clip-cccccccc-poster.jpg'] // referenced, tracked, aged
+  const drop = ['old-dddddddd.mp4', 'old-dddddddd-poster.jpg', 'x-eeeeeeee.jpeg', 'y-ffffffff.webp'] // tracked, aged, unreferenced
+  const fresh = ['new-11111111.jpg'] // tracked but uploaded a minute ago
+  const hand = ['hand-placed.jpg', 'team.webp', 'promo.mp4', 'logo.svg', 'clip-poster.jpg', 'clip-cccccccz.mp4', 'a-ABCDEF12.jpg', 'a-1234567.jpg', 'a-123456789.png', 'z-99999999.mp4', 'z-88888888.jpg'] // not in manifest
   await seed(client())
-  for (const f of [...keep, ...drop, ...hand]) await writeFile(join(dirOf(), f), 'x')
+  for (const f of [...keep, ...drop, ...fresh, ...hand]) await writeFile(join(dirOf(), f), 'x')
+  await track([...keep, ...drop])
+  await track(fresh, 60 * 1000)
   const r = await putClient(client({ logo: 'logo-aaaaaaaa.jpg', cover: 'cover-bbbbbbbb.webp', background: { type: 'video', file: 'clip-cccccccc.mp4', poster: 'clip-cccccccc-poster.jpg' } }))
   assert.equal(r.status, 200, await r.clone().text())
   const left = await ls()
-  for (const f of keep) assert.ok(left.includes(f), `deleted referenced ${f}`)
-  for (const f of drop) assert.ok(!left.includes(f), `kept orphan ${f}`)
-  for (const f of hand.filter((h) => h !== 'a-123456789.png' && h !== 'a-1234567.jpg')) assert.ok(left.includes(f), `deleted hand-placed ${f}`)
-  assert.ok(left.includes('a-1234567.jpg'), 'deleted a 7-hex name')
-  assert.ok(left.includes('a-123456789.png'), 'deleted a png (not in the orphan pattern)')
+  for (const f of [...keep, ...fresh, ...hand]) assert.ok(left.includes(f), `deleted ${f}`)
+  for (const f of drop) assert.ok(!left.includes(f), `kept tracked orphan ${f}`)
 })
 
-test('orphans: image background file is kept; switching to a colour background then drops it', async () => {
+test('orphans: image background file is kept; switching to a colour background then drops it (when tracked and aged)', async () => {
   await seed(client())
   await writeFile(join(dirOf(), 'photo-12345678.jpg'), 'x')
+  await track(['photo-12345678.jpg'])
   assert.equal((await putClient(client({ background: { type: 'image', file: 'photo-12345678.jpg' } }))).status, 200)
   assert.ok((await ls()).includes('photo-12345678.jpg'))
   assert.equal((await putClient(client())).status, 200)
   assert.ok(!(await ls()).includes('photo-12345678.jpg'))
+})
+
+test('orphans: the same unreferenced file with no manifest entry is never deleted', async () => {
+  await seed(client())
+  await writeFile(join(dirOf(), 'photo-12345678.jpg'), 'x')
+  assert.equal((await putClient(client())).status, 200)
+  assert.ok((await ls()).includes('photo-12345678.jpg'))
 })
 
 test('orphans: a REJECTED save (422) deletes nothing', async () => {

@@ -49,6 +49,7 @@ after(async () => {
 beforeEach(async () => {
   publishImpl = async () => ({ ok: true, output: 'published' })
   await rm(join(root, 'clients'), { recursive: true, force: true })
+  await rm(join(root, '.studio'), { recursive: true, force: true })
   await mkdir(join(root, 'clients'))
 })
 
@@ -627,6 +628,15 @@ test('preview of a page with a video background renders the backdrop and points 
 })
 
 /* ---- orphans ---- */
+// Contract (2026-11-11): only files recorded in <root>/.studio/uploads.json, unreferenced and uploaded over 1 hour ago, are deleted.
+const HOUR = 60 * 60 * 1000
+async function track(slug, names, ageMs = 2 * HOUR) {
+  const p = join(root, '.studio', 'uploads.json')
+  const m = await readFile(p, 'utf8').then(JSON.parse, () => ({}))
+  m[slug] = { ...m[slug], ...Object.fromEntries(names.map((n) => [n, Date.now() - ageMs])) }
+  await mkdir(join(root, '.studio'), { recursive: true })
+  await writeFile(p, JSON.stringify(m))
+}
 
 const bgData = (slug, extra = {}) => valid(slug, { background: { type: 'video', file: 'clip-bbbbbbbb.mp4', poster: 'clip-bbbbbbbb-poster.jpg', dim: 60 }, ...extra })
 
@@ -635,43 +645,56 @@ async function seedFolder(slug, names) {
   for (const n of names) await writeFile(join(root, 'clients', slug, n), n.endsWith('.svg') ? '<svg/>' : 'x')
 }
 
-test('PUT removes studio-made media the saved data no longer references, keeps everything else', async () => {
+test('PUT removes manifest-tracked, aged, unreferenced media; everything else survives', async () => {
   const names = [
-    'clip-bbbbbbbb.mp4', // referenced video
-    'clip-bbbbbbbb-poster.jpg', // referenced poster
-    'clip-aaaaaaaa.mp4', // orphan video
-    'clip-aaaaaaaa-poster.jpg', // orphan poster
-    'promo-cafebabe.webp', // orphan studio-style image
-    'shot-12345678.jpeg', // orphan studio-style image
-    'hero.mp4', // hand-placed: no hash in the name
+    'clip-bbbbbbbb.mp4', // referenced video (tracked, aged)
+    'clip-bbbbbbbb-poster.jpg', // referenced poster (tracked, aged)
+    'clip-aaaaaaaa.mp4', // orphan video (tracked, aged)
+    'clip-aaaaaaaa-poster.jpg', // orphan poster (tracked, aged)
+    'promo-cafebabe.webp', // orphan image (tracked, aged)
+    'shot-12345678.jpeg', // orphan image (tracked, aged)
+    'fresh-87654321.jpg', // orphan but uploaded moments ago (tracked, fresh)
+    'hero.mp4', // hand-placed
     'my-photo.jpg', // hand-placed
-    'logo.svg', // never touched (svg)
-    'brand-12345678.png', // png is not in the cleanup pattern
-    'brand-deadbeef.jpg', // referenced as the logo below
+    'hand-99999999.jpg', // hand-placed with a hashed-looking name: never deleted
+    'logo.svg', // hand-placed svg
+    'brand-12345678.png', // hand-placed png
+    'brand-deadbeef.jpg', // referenced as the logo below (tracked, aged)
   ]
   await seedFolder('orph-co', names)
+  await track('orph-co', ['clip-bbbbbbbb.mp4', 'clip-bbbbbbbb-poster.jpg', 'clip-aaaaaaaa.mp4', 'clip-aaaaaaaa-poster.jpg', 'promo-cafebabe.webp', 'shot-12345678.jpeg', 'brand-deadbeef.jpg'])
+  await track('orph-co', ['fresh-87654321.jpg'], 1000)
   const res = await api('/api/clients/orph-co', { method: 'PUT', body: { data: bgData('orph-co', { logo: 'brand-deadbeef.jpg' }), create: false } })
   assert.equal(res.status, 200, JSON.stringify(await res.clone().json()))
   const left = (await folderFiles('orph-co')).sort()
-  assert.deepEqual(left, ['brand-12345678.png', 'brand-deadbeef.jpg', 'client.js', 'clip-bbbbbbbb-poster.jpg', 'clip-bbbbbbbb.mp4', 'hero.mp4', 'logo.svg', 'my-photo.jpg'])
+  assert.deepEqual(left, ['brand-12345678.png', 'brand-deadbeef.jpg', 'client.js', 'clip-bbbbbbbb-poster.jpg', 'clip-bbbbbbbb.mp4', 'fresh-87654321.jpg', 'hand-99999999.jpg', 'hero.mp4', 'logo.svg', 'my-photo.jpg'])
 })
 
-test('PUT keeps a hashed file the data references as cover or as an image background', async () => {
+test('PUT keeps a tracked file the data references as cover or as an image background, drops the tracked orphan', async () => {
   await seedFolder('orph-co', ['cover-11111111.jpg', 'bgpic-22222222.webp', 'old-33333333.webp'])
+  await track('orph-co', ['cover-11111111.jpg', 'bgpic-22222222.webp', 'old-33333333.webp'])
   const data = valid('orph-co', { cover: 'cover-11111111.jpg', background: { type: 'image', file: 'bgpic-22222222.webp' } })
   assert.equal((await api('/api/clients/orph-co', { method: 'PUT', body: { data, create: false } })).status, 200)
   assert.deepEqual((await folderFiles('orph-co')).sort(), ['bgpic-22222222.webp', 'client.js', 'cover-11111111.jpg'])
 })
 
-test('switching the background to a colour releases its studio-made files', async () => {
+test('switching the background to a colour releases its tracked studio files, never hand-placed ones', async () => {
   await seedFolder('orph-co', ['clip-bbbbbbbb.mp4', 'clip-bbbbbbbb-poster.jpg', 'hero.mp4'])
+  await track('orph-co', ['clip-bbbbbbbb.mp4', 'clip-bbbbbbbb-poster.jpg'])
   assert.equal((await api('/api/clients/orph-co', { method: 'PUT', body: { data: valid('orph-co', { background: { type: 'color' } }), create: false } })).status, 200)
   assert.deepEqual((await folderFiles('orph-co')).sort(), ['client.js', 'hero.mp4'])
 })
 
-test('a rejected PUT deletes nothing', async () => {
+test('hand-placed files are never deleted, even ones that look studio-made (no manifest entry)', async () => {
+  await seedFolder('orph-co', ['clip-aaaaaaaa.mp4', 'clip-aaaaaaaa-poster.jpg', 'promo-cafebabe.webp'])
+  assert.equal((await api('/api/clients/orph-co', { method: 'PUT', body: { data: valid('orph-co'), create: false } })).status, 200)
+  assert.deepEqual((await folderFiles('orph-co')).sort(), ['clip-aaaaaaaa-poster.jpg', 'clip-aaaaaaaa.mp4', 'client.js', 'promo-cafebabe.webp'].sort())
+})
+
+test('a rejected PUT deletes nothing, even tracked aged orphans', async () => {
   const names = ['clip-aaaaaaaa.mp4', 'clip-aaaaaaaa-poster.jpg', 'promo-cafebabe.webp']
   await seedFolder('orph-co', names)
+  await track('orph-co', names)
   const bad = valid('orph-co', { background: { type: 'image', file: 'not-there.png' } })
   const res = await api('/api/clients/orph-co', { method: 'PUT', body: { data: bad, create: false } })
   assert.equal(res.status, 422)
