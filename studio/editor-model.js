@@ -211,3 +211,19 @@ export function renameGate({ from, to, dirty }) {
   const p = slugProblem(to)
   return p ? { ok: false, reason: p } : { ok: true, reason: '' }
 }
+
+/* ---------------------------------------------------------------- preview CSP */
+// The preview iframe runs on the studio origin (it needs allow-same-origin + allow-scripts for the video embeds),
+// so the page inside must not be able to run script or reach out. The meta CSP is placed first in <head>.
+export const PREVIEW_CSP =
+  "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
+  'frame-src https://www.youtube-nocookie.com https://www.tiktok.com; base-uri \'none\'; form-action \'none\''
+const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`
+export function withPreviewCsp(html) {
+  const s = String(html)
+  const head = /<head(?=[\s>])[^>]*>/i.exec(s)
+  if (head) return s.slice(0, head.index + head[0].length) + CSP_META + s.slice(head.index + head[0].length)
+  const root = /<html(?=[\s>])[^>]*>/i.exec(s)
+  if (root) return s.slice(0, root.index + root[0].length) + `<head>${CSP_META}</head>` + s.slice(root.index + root[0].length)
+  return `<head>${CSP_META}</head>${s}`
+}

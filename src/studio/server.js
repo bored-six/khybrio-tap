@@ -325,6 +325,9 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
       res.end(JSON.stringify(obj))
     }
     try {
+      // DNS-rebinding guard: only answer to our own loopback names on our own port
+      const port = req.socket.localPort
+      if (req.headers.host !== `localhost:${port}` && req.headers.host !== `127.0.0.1:${port}`) throw new HttpError(403, 'Forbidden host')
       const url = new URL(req.url, 'http://localhost')
       const { pathname } = url
       if (pathname.startsWith('/api/')) return await api(req, res, url, send)

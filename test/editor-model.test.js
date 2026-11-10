@@ -226,3 +226,34 @@ test('renameGate: disabled while dirty, no-op when unchanged, bad address explai
   assert.match(renameGate({ from: 'a-cafe', to: 'api', dirty: false }).reason, /reserved/)
   assert.deepEqual(renameGate({ from: 'a-cafe', to: 'b-cafe', dirty: false }), { ok: true, reason: '' })
 })
+
+/* ---------------------------------------------------------------- preview CSP */
+import { withPreviewCsp, PREVIEW_CSP } from '../studio/editor-model.js'
+
+test('withPreviewCsp: meta is the first element of head and blocks scripts', () => {
+  const out = withPreviewCsp('<!doctype html><html><head><meta charset="utf-8"><title>x</title></head><body></body></html>')
+  assert.match(out, /<head><meta http-equiv="Content-Security-Policy" content="[^"]*"><meta charset/)
+  assert.ok(out.includes("script-src 'none'"))
+  assert.ok(out.includes("default-src 'none'"))
+})
+test('withPreviewCsp: allows exactly the two frame hosts', () => {
+  const out = withPreviewCsp('<html><head></head></html>')
+  const frame = /frame-src ([^;"]*)/.exec(out)[1].trim().split(/\s+/)
+  assert.deepEqual(frame, ['https://www.youtube-nocookie.com', 'https://www.tiktok.com'])
+  assert.equal(PREVIEW_CSP.includes('unsafe-eval'), false)
+})
+test('withPreviewCsp: works when head has attributes', () => {
+  const out = withPreviewCsp('<html><HEAD lang="en" class="a"><title>x</title></HEAD></html>')
+  assert.match(out, /<HEAD lang="en" class="a"><meta http-equiv="Content-Security-Policy"/)
+  assert.equal(out.match(/Content-Security-Policy/g).length, 1)
+})
+test('withPreviewCsp: works with no head', () => {
+  const noHtml = withPreviewCsp('<p>hi</p>')
+  assert.ok(noHtml.startsWith('<head><meta http-equiv="Content-Security-Policy"'))
+  const withHtml = withPreviewCsp('<html><body>hi</body></html>')
+  assert.match(withHtml, /^<html><head><meta http-equiv="Content-Security-Policy"[^>]*><\/head><body>/)
+})
+test('withPreviewCsp: does not match <header> as head', () => {
+  const out = withPreviewCsp('<html><body><header>x</header></body></html>')
+  assert.ok(out.indexOf('Content-Security-Policy') < out.indexOf('<body>'))
+})

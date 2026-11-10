@@ -11,7 +11,7 @@ import { switchKind, placeholderFor } from './link-rules.js'
 import {
   BLOCK_TYPES, normHex, slugProblem, renameGate, canAdd, addBlock, moveBlock, removeBlock,
   addSocialItem, removeSocialItem, socialKinds, countByType, payload, fromData, blankDraft,
-  groupFonts, fontFaceCss, previewFamily, applyPalette, matchPalette,
+  groupFonts, fontFaceCss, previewFamily, applyPalette, matchPalette, withPreviewCsp,
 } from './editor-model.js'
 
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
@@ -1511,7 +1511,8 @@ function showHtml(html) {
   }
   back.onload = swap
   setTimeout(swap, 1200)
-  back.srcdoc = html
+  // CSP first: this frame shares the studio origin, so the page inside must not run script (see withPreviewCsp)
+  back.srcdoc = withPreviewCsp(html)
 }
 
 /* ---------------------------------------------------------------- errors + warnings */
