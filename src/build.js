@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, mkdir, rm, copyFile, rename } from 'node:fs/promises'
+import { readdir, readFile, writeFile, mkdir, rm, copyFile, rename, stat } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { validateClient, validateSite } from './validate.js'
@@ -7,6 +7,17 @@ import { esc } from './html.js'
 import { svgProblem } from './assets.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
+
+// Client folders that hold a client.js. Folders starting with '_' are drafts/templates, and a folder
+// with no client.js is an abandoned upload from the studio: both are skipped, never a build failure.
+export async function listClientFolders(clientsDir) {
+  const dirs = (await readdir(clientsDir, { withFileTypes: true })).filter((d) => d.isDirectory() && !d.name.startsWith('_'))
+  const keep = []
+  for (const d of dirs) {
+    if (await stat(join(clientsDir, d.name, 'client.js')).then((s) => s.isFile(), () => false)) keep.push(d.name)
+  }
+  return keep.sort()
+}
 
 export async function build({ root, outDir, site, looks, fonts } = {}) {
   let icon
@@ -24,10 +35,7 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
   if (!s.ok) problems.push(`site config:\n${s.errors.map((e) => `  - ${e}`).join('\n')}`)
 
   const clientsDir = join(root, 'clients')
-  const folders = (await readdir(clientsDir, { withFileTypes: true }))
-    .filter((d) => d.isDirectory() && !d.name.startsWith('_'))
-    .map((d) => d.name)
-    .sort()
+  const folders = await listClientFolders(clientsDir)
 
   const clients = []
   for (const folder of folders) {

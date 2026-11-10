@@ -144,3 +144,11 @@ test('SVG assets with script, event handlers or foreignObject are rejected', asy
   await addClient('svg-ok', good('svg-ok', { logo: 'logo.svg' }), { 'logo.svg': '<svg><path d="M0 0"/></svg>' })
   await run()
 })
+
+test('a folder with no client.js (abandoned upload) is skipped, not a failure', async () => {
+  await addClient('fine-one', good('fine-one'))
+  await mkdir(join(dir, 'clients', 'orphan-up'))
+  await writeFile(join(dir, 'clients', 'orphan-up', 'logo.png'), 'x')
+  const res = await run()
+  assert.deepEqual(res.pages, ['fine-one'])
+})

@@ -12,7 +12,7 @@ import { fonts } from '../fonts.js'
 import { icon } from '../icons.js'
 import { KINDS } from '../kinds.js'
 import { svgProblem } from '../assets.js'
-import { build } from '../build.js'
+import { build, listClientFolders } from '../build.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const studioDir = resolve(here, '../../studio')
@@ -131,7 +131,7 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
   async function state() {
     let folders = []
     try {
-      folders = (await readdir(clientsDir, { withFileTypes: true })).filter((d) => d.isDirectory() && !d.name.startsWith('_')).map((d) => d.name).sort()
+      folders = await listClientFolders(clientsDir)
     } catch {}
     const clients = []
     for (const slug of folders) {

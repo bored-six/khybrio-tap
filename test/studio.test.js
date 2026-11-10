@@ -197,3 +197,11 @@ test('preview assets are served, and only from inside the client folder', async 
   assert.notEqual((await fetch(`${base}/p/pic-co/..%2F..%2Fsecret.txt`)).status, 200)
   assert.equal((await fetch(`${base}/p/fonts/fraunces.woff2`)).status, 200)
 })
+
+test('a folder with uploads but no client.js is not listed (abandoned new page)', async () => {
+  await seed('real-one', valid('real-one'))
+  await mkdir(join(root, 'clients', 'orphan-up'))
+  await writeFile(join(root, 'clients', 'orphan-up', 'logo.png'), 'x')
+  const s = await (await api('/api/state')).json()
+  assert.deepEqual(s.clients.map((c) => c.slug), ['real-one'])
+})
