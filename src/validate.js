@@ -1,14 +1,20 @@
 import { KINDS } from './kinds.js'
-import { parseHex, contrastRatio } from './color.js'
+import { parseHex, contrastRatio, worstContrast, minDim, gradientMinContrast } from './color.js'
+import { STYLE, STYLE_KEYS } from './style.js'
 import { migrateRaw } from './migrate.js'
 import { parseVideo, embedSrc } from './embed.js'
 
 export const LIMITS = { blocks: 30, links: 20, videos: 3, socials: 2, socialItems: 8, heading: 60, text: 280, label: 40 }
 const BLOCK_TYPES = ['link', 'heading', 'text', 'socials', 'video']
 const BLOCK_KEYS = { link: ['type', 'kind', 'url', 'label'], heading: ['type', 'text'], text: ['type', 'text'], socials: ['type', 'items'], video: ['type', 'url'] }
-const ALLOWED = ['slug', 'name', 'tagline', 'look', 'theme', 'font', 'logo', 'cover', 'blocks', 'branches', 'credit']
+const ALLOWED = ['slug', 'name', 'tagline', 'look', 'theme', 'font', 'logo', 'cover', 'blocks', 'branches', 'credit', 'background', 'style']
 const RESERVED = ['assets', 'fonts', '404', 'index', 'api', 'media']
 export const FILE_RE = /^[a-z0-9][a-z0-9._-]*\.(svg|png|jpe?g|webp)$/i
+const IMG_BG_RE = /^[a-z0-9][a-z0-9._-]*\.(png|jpe?g|webp)$/i
+const VID_BG_RE = /^[a-z0-9][a-z0-9._-]*\.mp4$/
+const BG_TYPES = ['color', 'gradient', 'image', 'video']
+const BG_KEYS = { color: ['type'], gradient: ['type', 'stops', 'shape', 'angle'], image: ['type', 'file', 'blur', 'dim', 'focus'], video: ['type', 'file', 'poster', 'blur', 'dim', 'focus'] }
+const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 const isStr = (v) => typeof v === 'string'
 
@@ -119,6 +125,109 @@ export function validateClient(input, { folder, looks = [], fonts = [], bodyFont
   const logo = fileField('logo')
   const cover = fileField('cover')
 
+  // background
+  let background = { type: 'color' }
+  if (raw.background !== undefined) {
+    const b = raw.background
+    if (!isObj(b) || b.type === undefined) err('background: must be an object with a type')
+    else if (!isStr(b.type) || !BG_TYPES.includes(b.type)) err('background.type: must be one of color, gradient, image, video')
+    else {
+      const before = errors.length
+      const type = b.type
+      for (const k of Object.keys(b)) if (!BG_KEYS[type].includes(k)) err(`background.${k}: unknown key`)
+      const pending = []
+      if (type === 'gradient') {
+        let stops = null
+        if (!Array.isArray(b.stops) || b.stops.length < 2 || b.stops.length > 3) err('background.stops: need 2 or 3 colours')
+        else {
+          stops = b.stops.map((v, i) => {
+            if (isStr(v) && ['bg', 'ink', 'accent'].includes(v)) return { ref: v, hex: theme[v] }
+            const hex = parseHex(v)
+            if (!hex) err(`background.stops[${i}]: must be bg, ink, accent or a hex colour`)
+            return { ref: null, hex }
+          })
+        }
+        let shape = 'linear'
+        if (b.shape !== undefined) {
+          if (b.shape !== 'linear' && b.shape !== 'radial') err('background.shape: must be linear or radial')
+          else shape = b.shape
+        }
+        let angle = shape === 'linear' ? 180 : null
+        if (b.angle !== undefined) {
+          if (shape === 'radial' && b.shape === 'radial') err('background.angle: only used with shape linear')
+          else if (!isInt(b.angle, 0, 359)) err('background.angle: must be a whole number 0-359')
+          else if (shape === 'linear') angle = b.angle
+        }
+        background = { type, stops, shape, angle }
+        pending.push(() => {
+          if (!stops || !theme.ink || stops.some((x) => !x.hex)) return
+          const min = gradientMinContrast(theme.ink, stops.map((x) => x.hex))
+          if (min < 4.5) warnings.push(`background.stops: text contrast drops to ${min.toFixed(2)}:1 on part of the gradient, 4.5:1 recommended`)
+        })
+      } else if (type === 'image' || type === 'video') {
+        const check = (key, value, re, nameMsg) => {
+          if (!isStr(value) || !re.test(value) || value.includes('..')) {
+            err(`background.${key}: ${nameMsg}`)
+            return null
+          }
+          if (!files.includes(value)) {
+            err(`background.${key}: file "${value}" not found in the client folder`)
+            return null
+          }
+          return value
+        }
+        const imgMsg = 'must be a png, jpg, jpeg or webp file name'
+        const file = type === 'image' ? check('file', b.file, IMG_BG_RE, imgMsg) : check('file', b.file, VID_BG_RE, 'must be an .mp4 file name')
+        let poster
+        if (type === 'video') {
+          if (b.poster === undefined) err('background.poster: required for a video background')
+          else poster = check('poster', b.poster, IMG_BG_RE, imgMsg)
+        }
+        const maxBlur = type === 'image' ? 24 : 12
+        let blur = 0
+        if (b.blur !== undefined) {
+          if (!isInt(b.blur, 0, maxBlur)) err(`background.blur: must be a whole number 0-${maxBlur}`)
+          else blur = b.blur
+        }
+        let dim = 40
+        if (b.dim !== undefined) {
+          if (!isInt(b.dim, 0, 80)) err('background.dim: must be a whole number 0-80')
+          else dim = b.dim
+        }
+        let focus = [50, 50]
+        if (b.focus !== undefined) {
+          if (!Array.isArray(b.focus) || b.focus.length !== 2 || !isInt(b.focus[0], 0, 100) || !isInt(b.focus[1], 0, 100)) {
+            err('background.focus: must be [x, y] with whole numbers 0-100')
+          } else focus = [b.focus[0], b.focus[1]]
+        }
+        background = type === 'image' ? { type, file, blur, dim, focus } : { type, file, poster, blur, dim, focus }
+        pending.push(() => {
+          if (!theme.ink || !theme.bg) return
+          const n = minDim(theme.ink, theme.bg)
+          if (dim >= n) return
+          const r = worstContrast(theme.ink, theme.bg, dim).toFixed(2)
+          const tail = n > 80 ? 'even 80% dim cannot guarantee 4.5:1 with these colours' : `dim ${n}% or more keeps 4.5:1`
+          warnings.push(`background.dim: text can drop to ${r}:1 over the busiest part of the picture, ${tail}`)
+        })
+      }
+      if (errors.length === before) pending.forEach((f) => f())
+      else background = { type: 'color' }
+    }
+  }
+
+  // style
+  const style = Object.fromEntries(STYLE_KEYS.map((k) => [k, null]))
+  if (raw.style !== undefined) {
+    if (!isObj(raw.style)) err('style: must be an object')
+    else
+      for (const [k, v] of Object.entries(raw.style)) {
+        if (!STYLE_KEYS.includes(k)) err(`style.${k}: unknown key`)
+        else if (v === undefined) continue
+        else if (!isStr(v) || !Object.hasOwn(STYLE[k], v)) err(`style.${k}: must be one of ${Object.keys(STYLE[k]).join(', ')}`)
+        else style[k] = v
+      }
+  }
+
   // blocks
   const blocks = []
   const count = { link: 0, video: 0, socials: 0 }
@@ -215,5 +324,5 @@ export function validateClient(input, { folder, looks = [], fonts = [], bodyFont
   }
 
   if (errors.length) return { ok: false, client: null, errors, warnings }
-  return { ok: true, client: { slug, name, tagline, look: raw.look, theme, font, logo, cover, blocks, branches, credit }, errors, warnings }
+  return { ok: true, client: { slug, name, tagline, look: raw.look, theme, font, logo, cover, blocks, branches, credit, background, style }, errors, warnings }
 }
