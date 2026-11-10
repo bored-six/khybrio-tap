@@ -70,8 +70,20 @@ test('theme custom properties are on :root', () => {
   assert.match(root, /--ink:\s*#3b1f14/)
   assert.match(root, /--accent:\s*#e8622d/)
   assert.match(root, /--on-accent:\s*#[0-9a-f]{6}/)
-  assert.match(root, /--font-display:[^;]*Fraunces/)
+  assert.match(root, /--font-heading:[^;]*Fraunces/)
+  assert.match(root, /--font-tagline:[^;]*Inter/)
   assert.match(root, /--font-body:[^;]*Inter/)
+  assert.match(root, /--heading-weight:\s*600/)
+  assert.ok(!root.includes('--font-display'), '--font-display was removed in v2')
+})
+
+test('--heading-weight follows the heading font, each var follows its own font', () => {
+  const html = renderPage(client({ font: { heading: 'mono', tagline: 'fraunces', body: 'inter' } }), SITE, RENDER_OPTS)
+  const root = (html.match(/:root\s*\{([^}]*)\}/) || [])[1] || ''
+  assert.match(root, /--font-heading:[^;]*Mono/)
+  assert.match(root, /--font-tagline:[^;]*Fraunces/)
+  assert.match(root, /--font-body:[^;]*Inter/)
+  assert.match(root, /--heading-weight:\s*400/)
 })
 
 test('@font-face only for fonts the client uses, served from base/fonts', () => {
@@ -79,10 +91,16 @@ test('@font-face only for fonts the client uses, served from base/fonts', () => 
   assert.match(html, /url\(["']?\/khybrio-tap\/fonts\/fraunces\.woff2/)
   assert.match(html, /url\(["']?\/khybrio-tap\/fonts\/inter-400\.woff2/)
   assert.ok(!html.includes('mono.woff2'), 'unused font was emitted')
-  assert.equal((html.match(/@font-face/g) || []).length, 2)
+  assert.equal((html.match(/@font-face/g) || []).length, 2, 'heading fraunces, tagline+body inter: deduped to two')
 })
 
-test('links come through the look in order with the primary marked', () => {
+test('@font-face covers heading, tagline and body when all three differ', () => {
+  const html = renderPage(client({ font: { heading: 'mono', tagline: 'fraunces', body: 'inter' } }), SITE, RENDER_OPTS)
+  assert.equal((html.match(/@font-face/g) || []).length, 3)
+  for (const f of ['mono.woff2', 'fraunces.woff2', 'inter-400.woff2']) assert.ok(html.includes(f), f)
+})
+
+test('link blocks come through the look in order with the primary marked', () => {
   const html = renderPage(client(), SITE, RENDER_OPTS)
   const tags = linkTags(html)
   assert.deepEqual(tags.map((t) => t.kind), ['menu', 'messenger'])
@@ -90,8 +108,8 @@ test('links come through the look in order with the primary marked', () => {
 })
 
 test('page stays under 30 KB without images and fonts', () => {
-  const links = Array.from({ length: 12 }, (_, i) => ({ kind: 'website', url: `https://example.com/${i}`, label: 'x'.repeat(40) }))
-  const html = renderPage(client({ links, tagline: 'x'.repeat(120) }), SITE, RENDER_OPTS)
+  const blocks = Array.from({ length: 20 }, (_, i) => ({ type: 'link', kind: 'website', url: `https://example.com/${i}`, label: 'x'.repeat(40) }))
+  const html = renderPage(client({ blocks, tagline: 'x'.repeat(120) }), SITE, RENDER_OPTS)
   assert.ok(Buffer.byteLength(html) < 30 * 1024, `${Buffer.byteLength(html)} bytes`)
 })
 

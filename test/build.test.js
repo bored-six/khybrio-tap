@@ -22,7 +22,7 @@ const good = (slug, extra = {}) => ({
   name: `Client ${slug}`,
   look: 'plain',
   theme: { bg: '#ffffff', ink: '#111111', accent: '#e8622d' },
-  links: [{ kind: 'website', url: `https://example.com/${slug}` }],
+  blocks: [{ type: 'link', kind: 'website', url: `https://example.com/${slug}` }],
   ...extra,
 })
 
@@ -33,16 +33,16 @@ beforeEach(async () => {
   await writeFile(join(dir, 'fontsrc', 'i.woff2'), 'FONT-I')
   await writeFile(join(dir, 'fontsrc', 'm.woff2'), 'FONT-M')
   fonts = {
-    fraunces: { family: 'Fraunces', fallback: 'serif', files: [{ file: 'f.woff2', weight: '100 900', style: 'normal', path: join(dir, 'fontsrc', 'f.woff2') }] },
-    inter: { family: 'Inter', fallback: 'sans-serif', files: [{ file: 'i.woff2', weight: '400', style: 'normal', path: join(dir, 'fontsrc', 'i.woff2') }] },
-    mono: { family: 'Mono', fallback: 'monospace', files: [{ file: 'm.woff2', weight: '400', style: 'normal', path: join(dir, 'fontsrc', 'm.woff2') }] },
+    fraunces: { family: 'Fraunces', fallback: 'serif', group: 'serif', body: true, headingWeight: 600, files: [{ file: 'f.woff2', weight: '100 900', style: 'normal', path: join(dir, 'fontsrc', 'f.woff2') }] },
+    inter: { family: 'Inter', fallback: 'sans-serif', group: 'sans', body: true, headingWeight: 700, files: [{ file: 'i.woff2', weight: '400', style: 'normal', path: join(dir, 'fontsrc', 'i.woff2') }] },
+    mono: { family: 'Mono', fallback: 'monospace', group: 'mono', body: false, headingWeight: 400, files: [{ file: 'm.woff2', weight: '400', style: 'normal', path: join(dir, 'fontsrc', 'm.woff2') }] },
   }
 })
 afterEach(() => rm(dir, { recursive: true, force: true }))
 
 const run = (outDir = join(dir, 'dist')) => build({ root: dir, outDir, site: SITE, looks: FAKE_LOOKS, fonts })
 
-test('writes a page per client, its assets, used fonts once, 404, .nojekyll and a root redirect', async () => {
+test('writes a page per client, its assets, used fonts once, 404 and a root redirect (no .nojekyll)', async () => {
   await addClient('zeta-bar', good('zeta-bar', { logo: 'logo.svg' }), { 'logo.svg': '<svg/>' })
   await addClient('alpha-cafe', good('alpha-cafe', { cover: 'cover.jpg' }), { 'cover.jpg': 'JPG' })
   await addClient('_template', { anything: 'is ignored' })
@@ -58,7 +58,7 @@ test('writes a page per client, its assets, used fonts once, 404, .nojekyll and 
 
   assert.deepEqual((await readdir(join(out, 'fonts'))).sort(), ['f.woff2', 'i.woff2'], 'only used fonts, each once')
   assert.ok(await exists(join(out, '404.html')))
-  assert.ok(await exists(join(out, '.nojekyll')))
+  assert.ok(!(await exists(join(out, '.nojekyll'))), '.nojekyll is dropped: GitHub Pages is no longer the host')
 
   const index = await readFile(join(out, 'index.html'), 'utf8')
   assert.match(index, /http-equiv="refresh"/i)
@@ -68,7 +68,7 @@ test('writes a page per client, its assets, used fonts once, 404, .nojekyll and 
 
 test('one invalid client fails the whole build, names every problem, writes nothing', async () => {
   await addClient('fine-one', good('fine-one'))
-  await addClient('broken-one', good('broken-one', { theme: { bg: '#ffffff', ink: '#777777', accent: '#000000' } }))
+  await addClient('broken-one', good('broken-one', { look: 'nope' }))
   await addClient('broken-two', good('wrong-slug'))
 
   const out = join(dir, 'dist')
@@ -77,7 +77,7 @@ test('one invalid client fails the whole build, names every problem, writes noth
 
   await assert.rejects(run(out), (err) => {
     assert.match(err.message, /broken-one/)
-    assert.match(err.message, /theme\.ink/)
+    assert.match(err.message, /look/)
     assert.match(err.message, /broken-two/)
     assert.match(err.message, /slug/)
     assert.ok(!/fine-one/.test(err.message), 'valid clients should not be reported')
@@ -151,4 +151,75 @@ test('a folder with no client.js (abandoned upload) is skipped, not a failure', 
   await writeFile(join(dir, 'clients', 'orphan-up', 'logo.png'), 'x')
   const res = await run()
   assert.deepEqual(res.pages, ['fine-one'])
+})
+
+// ---- v2: redirects, fonts, warnings, migration -------------------------------------------------
+
+test('_redirects.json becomes dist/_redirect/{old} files whose body is the target slug', async () => {
+  await addClient('zeta-bar', good('zeta-bar'))
+  await writeFile(join(dir, 'clients', '_redirects.json'), JSON.stringify({ 'old-name': 'zeta-bar', 'older-one': 'zeta-bar' }))
+  const out = join(dir, 'dist')
+  const res = await run(out)
+  assert.deepEqual(res.pages, ['zeta-bar'], '_redirects.json is not a client')
+  assert.equal(await readFile(join(out, '_redirect', 'old-name'), 'utf8'), 'zeta-bar')
+  assert.equal(await readFile(join(out, '_redirect', 'older-one'), 'utf8'), 'zeta-bar')
+})
+
+test('no redirects file means no _redirect output and no failure', async () => {
+  await addClient('zeta-bar', good('zeta-bar'))
+  const out = join(dir, 'dist')
+  await run(out)
+  assert.ok(!(await exists(join(out, '_redirect'))) || (await readdir(join(out, '_redirect'))).length === 0)
+})
+
+test('bad redirects refuse the build and leave outDir untouched', async () => {
+  await addClient('zeta-bar', good('zeta-bar'))
+  await addClient('alpha-cafe', good('alpha-cafe'))
+  const out = join(dir, 'dist')
+  await mkdir(out)
+  await writeFile(join(out, 'keep.txt'), 'old')
+  for (const bad of [{ 'alpha-cafe': 'zeta-bar' }, { 'old-name': 'ghost-one' }, { 'Bad Key': 'zeta-bar' }]) {
+    await writeFile(join(dir, 'clients', '_redirects.json'), JSON.stringify(bad))
+    await assert.rejects(run(out), /redirects/, JSON.stringify(bad))
+    assert.deepEqual(await readdir(out), ['keep.txt'])
+  }
+})
+
+test('fonts are copied for heading, tagline and body only (deduped)', async () => {
+  await addClient('three-fonts', good('three-fonts', { font: { heading: 'mono', tagline: 'fraunces', body: 'inter' } }))
+  const out = join(dir, 'dist')
+  await run(out)
+  assert.deepEqual((await readdir(join(out, 'fonts'))).sort(), ['f.woff2', 'i.woff2', 'm.woff2'])
+  await rm(join(dir, 'clients', 'three-fonts'), { recursive: true })
+  await addClient('one-font', good('one-font', { font: { heading: 'inter' } }))
+  await run(out)
+  assert.deepEqual((await readdir(join(out, 'fonts'))).sort(), ['i.woff2'])
+})
+
+test('warnings are returned per slug, never thrown, and only slugs with warnings appear', async () => {
+  await addClient('fine-one', good('fine-one'))
+  await addClient('pale-one', good('pale-one', { theme: { bg: '#ffffff', ink: '#777777', accent: '#000000' } }))
+  const out = join(dir, 'dist')
+  const res = await run(out)
+  assert.deepEqual(res.pages, ['fine-one', 'pale-one'])
+  assert.deepEqual(Object.keys(res.warnings), ['pale-one'])
+  assert.ok(res.warnings['pale-one'].some((w) => w.startsWith('theme.ink: contrast against bg is')))
+  assert.ok(await exists(join(out, 'pale-one', 'index.html')), 'the page is still built')
+})
+
+test('a clean build returns an empty warnings object', async () => {
+  await addClient('fine-one', good('fine-one'))
+  assert.deepEqual((await run()).warnings, {})
+})
+
+test('a v1 client.js (links, font.display) builds, and build never rewrites the file', async () => {
+  const v1 = { slug: 'old-style', name: 'Old Style', look: 'plain', theme: { bg: '#ffffff', ink: '#111111', accent: '#e8622d' }, font: { display: 'fraunces', body: 'inter' }, links: [{ kind: 'website', url: 'https://example.com/old' }] }
+  await addClient('old-style', v1)
+  const file = join(dir, 'clients', 'old-style', 'client.js')
+  const before = await readFile(file, 'utf8')
+  const out = join(dir, 'dist')
+  const res = await run(out)
+  assert.deepEqual(res.pages, ['old-style'])
+  assert.match(await readFile(join(out, 'old-style', 'index.html'), 'utf8'), /https:\/\/example\.com\/old/)
+  assert.equal(await readFile(file, 'utf8'), before)
 })
