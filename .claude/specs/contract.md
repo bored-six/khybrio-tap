@@ -151,3 +151,13 @@ A look must output each link exactly as the page rules say (href, data-kind, dat
   - `404.html` (render404) and `.nojekyll`
   - `index.html`: redirect to `site.mainSite` (meta refresh + a plain link), no client list
 - Returns `{ pages }`, the slugs sorted.
+
+## Hardening (added after review, 2026-11-10)
+
+- `site.base` must match `/^\/([A-Za-z0-9._~-]+\/)*$/`.
+- build() writes into a temp dir beside `outDir` and swaps it in only when everything succeeded.
+  Any failure (validation, render, copy, font) leaves `outDir` exactly as it was.
+- Asset names in `files` are regular files only (a directory named `logo.png` is not a file).
+- SVG logo/cover: rejected (error on `logo` / `cover`) if it contains `<script`, an `on*=` attribute
+  (any case, optional spaces before `=`), or `foreignObject`.
+- Dev server: concurrent requests share one in-flight rebuild; binds 127.0.0.1.

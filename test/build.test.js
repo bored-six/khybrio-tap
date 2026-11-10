@@ -107,3 +107,40 @@ test('a successful build clears stale output', async () => {
   await run(out)
   assert.ok(!(await exists(join(out, 'removed-client'))))
 })
+
+test('a failure after validation (render throws) still writes nothing', async () => {
+  await addClient('fine-one', good('fine-one'))
+  const out = join(dir, 'dist')
+  await mkdir(out)
+  await writeFile(join(out, 'keep.txt'), 'old')
+  const boom = { plain: { label: 'Boom', render: () => { throw new Error('render exploded') }, css: () => '' } }
+  await assert.rejects(build({ root: dir, outDir: out, site: SITE, looks: boom, fonts }), /render exploded/)
+  assert.deepEqual(await readdir(out), ['keep.txt'], 'outDir must be untouched on failure')
+})
+
+test('a directory posing as an asset is rejected and writes nothing', async () => {
+  await addClient('dir-logo', good('dir-logo', { logo: 'logo.png' }))
+  await mkdir(join(dir, 'clients', 'dir-logo', 'logo.png'))
+  const out = join(dir, 'dist')
+  await mkdir(out)
+  await writeFile(join(out, 'keep.txt'), 'old')
+  await assert.rejects(run(out))
+  assert.deepEqual(await readdir(out), ['keep.txt'])
+})
+
+test('SVG assets with script, event handlers or foreignObject are rejected', async () => {
+  const bad = [
+    '<svg><script>alert(1)</script></svg>',
+    '<svg><rect onload="alert(1)"/></svg>',
+    '<svg><rect ONCLICK = "x"/></svg>',
+    '<svg><foreignObject><div/></foreignObject></svg>',
+  ]
+  for (const [i, body] of bad.entries()) {
+    const slug = `svg-bad-${i}`
+    await addClient(slug, good(slug, { logo: 'logo.svg' }), { 'logo.svg': body })
+    await assert.rejects(run(join(dir, `out-${i}`)), /logo/, body)
+    await rm(join(dir, 'clients', slug), { recursive: true })
+  }
+  await addClient('svg-ok', good('svg-ok', { logo: 'logo.svg' }), { 'logo.svg': '<svg><path d="M0 0"/></svg>' })
+  await run()
+})

@@ -155,3 +155,11 @@ test('validateSite', () => {
   assert.equal(validateSite({ ...SITE, base: '/tap' }).ok, false)
   assert.equal(validateSite({ ...SITE, mainSite: 'http://khybrio.com/' }).ok, false)
 })
+
+test('validateSite: base is a plain path, nothing that can break out of CSS url()', () => {
+  for (const bad of ['//', '/a)b/', '/a;b/', '/a b/', '/</style>/', '/a//b/']) {
+    assert.equal(validateSite({ ...SITE, base: bad }).ok, false, `base ${bad} should fail`)
+  }
+  assert.equal(validateSite({ ...SITE, base: '/khybrio-tap/' }).ok, true)
+  assert.equal(validateSite({ ...SITE, base: '/a/b-c/' }).ok, true)
+})
