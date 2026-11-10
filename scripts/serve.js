@@ -64,4 +64,11 @@ createServer(async (req, res) => {
     if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
     res.end(String(e.message))
   }
-}).listen(port, '127.0.0.1', () => console.log(`http://127.0.0.1:${port}/`))
+})
+  .on('error', (e) => {
+    if (e.code !== 'EADDRINUSE') throw e
+    console.error(`Port ${port} is already in use (probably another copy of this dev server).`)
+    console.error(`Open http://localhost:${port}/khybrio-tap/ or pick another port: PORT=${port + 1} npm run dev`)
+    process.exit(1)
+  })
+  .listen(port, '127.0.0.1', () => console.log(`Tap pages: http://localhost:${port}/khybrio-tap/`))
