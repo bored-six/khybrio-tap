@@ -13,6 +13,7 @@ import {
   BLOCK_TYPES, normHex, slugProblem, renameGate, canAdd, addBlock, moveBlock, removeBlock,
   addSocialItem, removeSocialItem, socialKinds, countByType, payload, fromData, blankDraft,
   groupFonts, fontFaceCss, previewFamily, applyPalette, matchPalette, withPreviewCsp,
+  styleControl, posterTime, videoChecks, dimRecommendation,
 } from './editor-model.js'
 
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
@@ -176,6 +177,10 @@ const FIELD_NAMES = {
   'theme.bg': 'Background', 'theme.ink': 'Text colour', 'theme.accent': 'Accent', font: 'Fonts',
   'font.heading': 'Heading font', 'font.tagline': 'Tagline font', 'font.body': 'Body font', logo: 'Logo', cover: 'Cover',
   blocks: 'Blocks', branches: 'Branches', credit: 'Credit',
+  background: 'Background', 'background.stops': 'Gradient colours', 'background.shape': 'Gradient shape', 'background.angle': 'Gradient angle',
+  'background.file': 'Background file', 'background.poster': 'Video still frame', 'background.blur': 'Blur', 'background.dim': 'Dim', 'background.focus': 'Focus', 'background.type': 'Background type',
+  style: 'Style', 'style.buttonShape': 'Button shape', 'style.buttonFill': 'Button fill', 'style.linkLayout': 'Link layout', 'style.align': 'Alignment',
+  'style.logoShape': 'Logo shape', 'style.coverShape': 'Cover shape', 'style.spacing': 'Spacing', 'style.shadow': 'Shadow',
 }
 const SUB = { url: 'address', label: 'button text', kind: 'kind', text: 'text', items: 'icons', name: 'name', address: 'address', hours: 'hours', maps: 'maps link' }
 const TYPE_NAME = { link: 'Link', heading: 'Heading', text: 'Text', socials: 'Socials', video: 'Video' }
@@ -566,6 +571,8 @@ function buildEditor() {
     sec('Colours', 'Start from a swatch, then bend it. Any colour is allowed.', colourFields()),
     sec('Type', 'Heading is the name and headings, tagline is the line under the name, body is everything else.', fontPickers()),
     sec('Images', 'Any photo works: it is shrunk and converted here before it uploads. SVG is kept as is. Use a photo for the cover: Facebook ignores SVG previews.', imageFields()),
+    sec('Background', 'Behind everything on the page. Photo and video are dimmed so text stays readable.', backgroundFields()),
+    sec('Style', 'Shape the buttons and layout. Some looks keep their own style.', styleFields()),
     sec('Blocks', null, blockSection()),
     sec('Branches', 'Optional. Leave empty for a single shop with no address shown.', branchSection()),
     sec('Footer', null, creditField()),
@@ -674,7 +681,7 @@ function addressField() {
 }
 function lockSlug() {
   if (E.mode !== 'new' || !E.els.slug) return
-  const locked = Boolean(E.uploaded && (E.D.logo || E.D.cover))
+  const locked = Boolean(E.uploaded && (E.D.logo || E.D.cover || E.bgUi?.media.image?.file || E.bgUi?.media.video?.file))
   E.els.slug.ctl.readOnly = locked
   E.els.slug.box.classList.toggle('locked', locked)
   E.els.slug.lockNote.hidden = !locked
@@ -860,7 +867,7 @@ function lookTiles() {
   E.els.tiles = wrap
   for (const l of st.looks) {
     const radio = h('input', { type: 'radio', name: 'look', value: l.id, checked: D.look === l.id })
-    radio.addEventListener('change', () => { if (radio.checked) { D.look = l.id; changed() } })
+    radio.addEventListener('change', () => { if (radio.checked) { D.look = l.id; E.els.stylePaint?.(); changed() } })
     const art = (LOOK_ART[l.id] || LOOK_ART._)(`clip-${l.id}`)
     wrap.append(h('label', { class: 'tile' }, radio,
       frag(`<svg class="tile-art" viewBox="0 0 60 96" aria-hidden="true" focusable="false">${art}</svg>`),
@@ -944,7 +951,7 @@ function paintPalettes() {
   const hit = matchPalette(E.D.theme, E.st.palettes)
   for (const b of E.els.palettes.querySelectorAll('[data-palette]')) b.setAttribute('aria-pressed', String(b.dataset.palette === hit))
 }
-function afterColour() { paintRatios(); paintTiles(); paintPalettes(); changed() }
+function afterColour() { paintRatios(); paintTiles(); paintPalettes(); E.els.bgPaint?.(); changed() }
 function paintRatios() {
   const t = E.D.theme
   const bg = normHex(t.bg), ink = normHex(t.ink), ac = normHex(t.accent)
@@ -1155,7 +1162,323 @@ function imageField(key, label, hint) {
   return wrap
 }
 
-/* ----- 07 blocks */
+/* ----- 07 background + style (v3) */
+// DATA first (ui state, commit, uploads), markup after. Hooks: [data-part="bg-*"], [data-part="style-*"], classes bg-* / style-*.
+const BG_TYPES = [['color', 'Colour'], ['gradient', 'Gradient'], ['image', 'Photo'], ['video', 'Video']]
+const BLUR_MAX = { image: 24, video: 12 }
+const REFS = [['bg', 'Background'], ['ink', 'Text'], ['accent', 'Accent']]
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1)
+const STYLE_LABEL = { buttonShape: 'Button shape', buttonFill: 'Button fill', linkLayout: 'Link layout', align: 'Alignment', logoShape: 'Logo shape', coverShape: 'Cover shape', spacing: 'Spacing', shadow: 'Shadow' }
+const clampInt = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.round(Number(n) || 0)))
+const cloneJson = (v) => JSON.parse(JSON.stringify(v))
+
+function bgInit() {
+  const b = E.D.background
+  const ui = { type: b ? b.type : 'color', grad: { stops: ['bg', 'accent'], shape: 'linear', angle: 180 }, media: {}, ver: Date.now() }
+  if (b && b.type === 'gradient') {
+    ui.grad = { stops: Array.isArray(b.stops) ? b.stops.map(String) : ['bg', 'accent'], shape: b.shape === 'radial' ? 'radial' : 'linear', angle: Number.isInteger(b.angle) ? b.angle : 180 }
+  }
+  if (b && (b.type === 'image' || b.type === 'video')) {
+    ui.media[b.type] = { file: str(b.file), poster: str(b.poster), blur: Number.isInteger(b.blur) ? b.blur : 0, dim: Number.isInteger(b.dim) ? b.dim : 40, focus: Array.isArray(b.focus) ? [...b.focus] : [50, 50] }
+  }
+  return ui
+}
+// DATA: the draft only holds a background once it is complete (a photo or video needs its file first).
+function bgCommit() {
+  const ui = E.bgUi, D = E.D, t = ui.type
+  if (t === 'gradient') D.background = { type: 'gradient', stops: [...ui.grad.stops], shape: ui.grad.shape, angle: ui.grad.angle }
+  else if (t === 'image' || t === 'video') {
+    const m = ui.media[t]
+    if (!m || !m.file || (t === 'video' && !m.poster)) D.background = null
+    else {
+      D.background = { type: t, file: m.file }
+      if (t === 'video') D.background.poster = m.poster
+      Object.assign(D.background, { blur: Math.min(m.blur, BLUR_MAX[t]), dim: m.dim, focus: [...m.focus] })
+    }
+  } else D.background = null
+}
+const bgMedia = (t) => (E.bgUi.media[t] ||= { file: '', poster: '', blur: 0, dim: 40, focus: [50, 50] })
+
+async function uploadAsset(name, body, type) {
+  const r = await api(`/api/clients/${E.D.slug}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', body, type })
+  if (r.status === 201 && r.data && r.data.file) return { file: r.data.file, warnings: r.data.warnings || [] }
+  throw new PrepError(r.data && r.data.error ? r.data.error : r.offline ? 'The studio server is not running.' : `Upload failed (server answered ${r.status}).`)
+}
+
+// A hidden <video> on the chosen file: gives size facts for the checks, and the frame for the poster.
+function loadVideo(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const v = document.createElement('video')
+    v.muted = true; v.playsInline = true; v.preload = 'auto'
+    const fail = () => { URL.revokeObjectURL(url); reject(new Error('unreadable')) }
+    const t = setTimeout(fail, 10000)
+    v.onloadeddata = () => { clearTimeout(t); resolve({ v, url }) }
+    v.onerror = () => { clearTimeout(t); fail() }
+    v.src = url
+  })
+}
+async function grabPoster(v) {
+  const at = posterTime(v.duration)
+  if (at > 0.001) {
+    await new Promise((res, rej) => {
+      const t = setTimeout(() => rej(new Error('seek timeout')), 8000)
+      v.onseeked = () => { clearTimeout(t); res() }
+      v.currentTime = at
+    })
+  }
+  const { width, height } = targetSize(v.videoWidth, v.videoHeight, 1280)
+  const canvas = document.createElement('canvas')
+  canvas.width = width; canvas.height = height
+  const ctx = canvas.getContext('2d')
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(v, 0, 0, width, height)
+  const blob = await toBlob(canvas, 'image/jpeg', 0.82)
+  if (!blob) throw new Error('no frame')
+  return blob
+}
+
+function backgroundFields() {
+  const { D, st } = E
+  const ui = E.bgUi = bgInit()
+  const body = h('div', { class: 'bg-body', 'data-part': 'bg-body' })
+  const typeBox = h('div', { class: 'bg-types', role: 'radiogroup', 'aria-label': 'Background type', 'data-part': 'bg-type' })
+  for (const [id, label] of BG_TYPES) {
+    const r = h('input', { type: 'radio', name: 'bg-type', value: id, checked: ui.type === id })
+    r.addEventListener('change', () => { if (r.checked) setType(id) })
+    typeBox.append(h('label', { class: 'bg-type' }, r, h('span', null, label)))
+  }
+  E.els.bg = { body, paint: () => {} }
+  const setType = (t) => { ui.type = t; bgCommit(); render(); changed() }
+  const render = () => {
+    E.els.bg.paint = () => {}
+    body.replaceChildren(ui.type === 'gradient' ? gradientBody() : ui.type === 'color' ? h('p', { class: 'hint' }, 'The page background colour from Colours. Pick Gradient, Photo or Video to go further.') : mediaBody(ui.type))
+    E.els.bg.paint()
+  }
+  E.els.bgPaint = () => E.els.bg.paint()
+  render()
+  return [h('div', { class: 'f', dataset: { path: 'background' } }, typeBox, h('p', { class: 'err' })), body]
+}
+
+function gradientBody() {
+  const { D } = E, ui = E.bgUi, g = ui.grad
+  const upd = () => { bgCommit(); changed() }
+  const rows = h('div', { class: 'bg-stops', 'data-part': 'bg-stops' })
+  const paintRows = () => {
+    rows.replaceChildren(...g.stops.map((s, i) => stopRow(i)))
+    addBtn.hidden = g.stops.length >= 3
+  }
+  const stopRow = (i) => {
+    const hex = input({ maxlength: 7, placeholder: '#hex', 'aria-label': `Stop ${i + 1} hex colour`, 'data-part': `bg-stop-hex-${i}`, value: REFS.some(([r]) => r === g.stops[i]) ? '' : g.stops[i] })
+    const chips = REFS.map(([ref, label]) => {
+      const b = h('button', { class: 'bg-chip', type: 'button', 'data-ref': ref, 'aria-pressed': String(g.stops[i] === ref), 'aria-label': `Stop ${i + 1}: ${label}`, title: label },
+        h('i', { 'aria-hidden': 'true' }), h('span', null, label))
+      b.addEventListener('click', () => { g.stops[i] = ref; hex.value = ''; paintPressed(); upd() })
+      return b
+    })
+    const paintPressed = () => { for (const c of chips) c.setAttribute('aria-pressed', String(c.dataset.ref === g.stops[i])) }
+    hex.addEventListener('input', () => {
+      let v = hex.value.trim()
+      if (!v) return
+      if (v[0] !== '#') v = '#' + v
+      g.stops[i] = v
+      paintPressed(); upd()
+    })
+    const del = h('button', { class: 'btn btn-sm btn-ghost', type: 'button', 'data-part': 'bg-stop-remove', onclick: () => { g.stops.splice(i, 1); paintRows(); upd() } }, icon('close'), 'Remove')
+    del.hidden = g.stops.length < 3 || i < 2
+    return h('div', { class: 'bg-stop', dataset: { stop: i } }, h('span', { class: 'lbl' }, `Stop ${i + 1}`), h('div', { class: 'bg-chips' }, chips), hex, del)
+  }
+  const addBtn = h('button', { class: 'btn btn-sm', type: 'button', 'data-part': 'bg-stop-add', onclick: () => { if (g.stops.length < 3) { g.stops.push('ink'); paintRows(); upd() } } }, icon('plus'), 'Add a third colour')
+  paintRows()
+
+  const shape = h('div', { class: 'bg-shape', role: 'radiogroup', 'aria-label': 'Gradient shape', 'data-part': 'bg-shape' },
+    ['linear', 'radial'].map((s) => {
+      const r = h('input', { type: 'radio', name: 'bg-shape', value: s, checked: g.shape === s })
+      r.addEventListener('change', () => { if (r.checked) { g.shape = s; angleF.hidden = s === 'radial'; upd() } })
+      return h('label', { class: 'bg-type' }, r, h('span', null, cap(s)))
+    }))
+  const num = input({ type: 'number', min: 0, max: 359, step: 1, value: String(g.angle), 'aria-label': 'Angle in degrees', 'data-part': 'bg-angle-num' })
+  const range = h('input', { type: 'range', min: 0, max: 359, step: 15, value: String(g.angle), 'aria-label': 'Angle', 'data-part': 'bg-angle' })
+  range.addEventListener('input', () => { g.angle = Number(range.value); num.value = String(g.angle); upd() })
+  num.addEventListener('input', () => {
+    const n = Number(num.value)
+    if (num.value === '' || !Number.isFinite(n)) return
+    g.angle = clampInt(n, 0, 359); range.value = String(g.angle); upd()
+  })
+  const angleF = h('div', { class: 'bg-angle' }, h('span', { class: 'lbl' }, 'Angle'), range, num, h('span', { class: 'hint' }, 'degrees'))
+  angleF.hidden = g.shape === 'radial'
+  const paintChips = () => {
+    const t = D.theme
+    for (const [ref] of REFS) for (const i of rows.querySelectorAll(`[data-ref="${ref}"] i`)) i.style.background = normHex(t[ref]) || 'transparent'
+  }
+  E.els.bg.paint = paintChips
+  return h('div', null,
+    h('div', { class: 'f', dataset: { path: 'background.stops' } }, h('span', { class: 'lbl' }, 'Colours'), rows, addBtn, h('p', { class: 'hint' }, 'Pick a theme colour, or type any hex.'), h('p', { class: 'err' })),
+    h('div', { class: 'f', dataset: { path: 'background.shape' } }, shape, h('p', { class: 'err' })),
+    h('div', { class: 'f', dataset: { path: 'background.angle' } }, angleF, h('p', { class: 'err' })))
+}
+
+function mediaBody(t) {
+  const { D } = E, ui = E.bgUi
+  const isVid = t === 'video'
+  const m = bgMedia(t)
+  const status = h('p', { class: 'hint', 'aria-live': 'polite', 'data-part': 'bg-status' })
+  const err = h('p', { class: 'err' })
+  const notes = h('div', { class: 'bg-notes', 'data-part': 'bg-notes' })
+  const fileIn = h('input', { type: 'file', accept: isVid ? '.mp4,video/mp4' : 'image/*,.heic,.heif', 'aria-label': isVid ? 'Choose video file' : 'Choose photo file', 'data-part': 'bg-file' })
+  const pickLbl = h('span', null)
+  const pick = h('label', { class: 'btn btn-sm pick' }, icon(isVid ? 'video' : 'image'), pickLbl, fileIn)
+  const remove = h('button', { class: 'btn btn-sm btn-ghost btn-danger', type: 'button', 'data-part': 'bg-remove' }, icon('close'), 'Remove')
+  const wrap = h('div', { class: 'f bg-media', dataset: { path: 'background.file' } }, h('span', { class: 'lbl' }, isVid ? 'Video (mp4)' : 'Photo'),
+    h('div', { class: 'img-acts' }, pick, remove), status, notes, err)
+  const fine = h('div', { class: 'bg-fine', 'data-part': 'bg-fine' })
+
+  const local = (msg) => { status.textContent = ''; wrap.classList.add('bad'); err.replaceChildren(icon('warn'), h('span', null, msg)) }
+  const showNotes = (list) => notes.replaceChildren(...list.map((w) => h('p', { class: 'bg-note' }, icon('note'), h('span', null, w))))
+
+  const paintFine = () => {
+    pickLbl.textContent = m.file ? 'Replace' : 'Choose file'
+    remove.hidden = !m.file
+    fine.hidden = !m.file
+    fine.replaceChildren()
+    if (!m.file) return
+    const src = `/p/${D.slug}/${encodeURIComponent(isVid ? m.poster : m.file)}?v=${ui.ver}`
+    const dotEl = h('i', { class: 'bg-dot', 'aria-hidden': 'true' })
+    const thumb = h('button', { class: 'bg-thumb', type: 'button', 'data-part': 'bg-focus' }, h('img', { src, alt: '' }), dotEl)
+    const paintDot = () => {
+      dotEl.style.left = `${m.focus[0]}%`; dotEl.style.top = `${m.focus[1]}%`
+      thumb.setAttribute('aria-label', `Focus point, ${m.focus[0]} percent across, ${m.focus[1]} percent down. Click the picture or use the arrow keys.`)
+    }
+    const setFocus = (x, y) => { m.focus = [clampInt(x, 0, 100), clampInt(y, 0, 100)]; paintDot(); bgCommit(); changed() }
+    thumb.addEventListener('click', (e) => {
+      const r = thumb.getBoundingClientRect()
+      if (r.width && r.height) setFocus(((e.clientX - r.left) / r.width) * 100, ((e.clientY - r.top) / r.height) * 100)
+    })
+    thumb.addEventListener('keydown', (e) => {
+      const d = { ArrowLeft: [-5, 0], ArrowRight: [5, 0], ArrowUp: [0, -5], ArrowDown: [0, 5] }[e.key]
+      if (!d) return
+      e.preventDefault(); setFocus(m.focus[0] + d[0], m.focus[1] + d[1])
+    })
+    paintDot()
+    const max = BLUR_MAX[t]
+    const slider = (key, label, hi, onSet) => {
+      const rg = h('input', { type: 'range', min: 0, max: hi, step: 1, value: String(m[key]), 'aria-label': label, 'data-part': `bg-${key}` })
+      const out = h('output', { class: 'bg-val' }, key === 'dim' ? `${m[key]}%` : `${m[key]} px`)
+      rg.addEventListener('input', () => { m[key] = Number(rg.value); out.textContent = key === 'dim' ? `${m[key]}%` : `${m[key]} px`; onSet(); bgCommit(); changed() })
+      return h('div', { class: 'f bg-slider', dataset: { path: `background.${key}` } }, h('span', { class: 'lbl' }, label), rg, out, h('p', { class: 'err' }))
+    }
+    const hint = h('p', { class: 'hint', 'data-part': 'bg-dim-hint' })
+    const paintHint = () => {
+      const n = dimRecommendation(D.theme.ink, D.theme.bg)
+      hint.textContent = n === null ? 'Check the Text and Background colours: even full dim cannot keep text readable with these.'
+        : n === 0 ? 'Any dim keeps text readable with these colours.' : `Dim ${n}% or more keeps text readable.`
+    }
+    paintHint()
+    E.els.bg.paint = paintHint
+    fine.append(
+      h('div', { class: 'f', dataset: { path: 'background.focus' } }, h('span', { class: 'lbl' }, 'Focus'), thumb, h('p', { class: 'hint' }, 'The part of the picture that stays in view on a narrow phone.'), h('p', { class: 'err' })),
+      slider('blur', 'Blur', max, () => {}),
+      slider('dim', 'Dim', 80, paintHint),
+      hint)
+  }
+  paintFine()
+
+  const busy = (on) => { pick.classList.toggle('busy', on); fileIn.disabled = on }
+  const finish = (next, warnings) => {
+    Object.assign(m, next)
+    ui.ver = Date.now(); E.uploaded = true
+    bgCommit(); paintFine(); lockSlug(); changed()
+    showNotes(warnings)
+  }
+  const uploadPhoto = async (file) => {
+    const out = await prepareImage(file, 'cover')
+    if (out.blob.size > MAX_ASSET) throw new PrepError(`That file is ${sizeText(out.blob.size)}. The limit is 3 MB.`)
+    status.textContent = 'Uploading...'
+    const up = await uploadAsset(`bg-${out.name}`, out.blob, out.blob.type)
+    finish({ file: up.file }, up.warnings)
+    status.textContent = `Uploaded, ${sizeText(out.blob.size)}`
+  }
+  const uploadVideo = async (file) => {
+    if (!/\.mp4$/i.test(file.name) && file.type !== 'video/mp4') throw new PrepError('Choose an .mp4 video. On iPhone, export as "Most Compatible" (H.264).')
+    status.textContent = 'Reading video...'
+    let loaded = null
+    try { loaded = await loadVideo(file) } catch { /* the server still checks the file; poster below will fail clearly */ }
+    try {
+      const facts = loaded ? { size: file.size, duration: loaded.v.duration, width: loaded.v.videoWidth } : { size: file.size, duration: 0, width: 0 }
+      const c = videoChecks(facts, E.st.media)
+      if (c.block) throw new PrepError(c.block)
+      status.textContent = 'Uploading video...'
+      const name = file.name.toLowerCase().replace(/\s+/g, '-')
+      const up = await uploadAsset(name, file, 'video/mp4')
+      if (!loaded) throw new PrepError('This browser could not read that video to make a still frame. Re-export it as H.264 MP4 and try again.')
+      status.textContent = 'Making the still frame...'
+      let blob
+      try { blob = await grabPoster(loaded.v) } catch { throw new PrepError('Could not take a still frame from this video. Nothing was changed.') }
+      const poster = await uploadAsset(outputName(`${up.file.replace(/\.mp4$/i, '')}-poster`, 'jpg'), blob, 'image/jpeg')
+      finish({ file: up.file, poster: poster.file }, [...c.warnings, ...up.warnings])
+      status.textContent = `Uploaded, ${sizeText(file.size)}`
+    } finally { if (loaded) URL.revokeObjectURL(loaded.url) }
+  }
+  const upload = async (file) => {
+    wrap.classList.remove('bad'); err.replaceChildren(); showNotes([])
+    const sp = slugProblem(D.slug)
+    if (sp) return local('Set the page address first, the file is stored under it.')
+    busy(true)
+    try { await (isVid ? uploadVideo(file) : uploadPhoto(file)) }
+    catch (e) { if (E) local(e instanceof PrepError ? e.message : 'Something went wrong while uploading. Try again.') }
+    finally { busy(false) }
+  }
+  fileIn.addEventListener('change', () => { const f = fileIn.files && fileIn.files[0]; fileIn.value = ''; if (f) upload(f) })
+  let depth = 0
+  const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files')
+  wrap.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); depth++; wrap.classList.add('drop') })
+  wrap.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } })
+  wrap.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) wrap.classList.remove('drop') })
+  wrap.addEventListener('drop', (e) => { e.preventDefault(); depth = 0; wrap.classList.remove('drop'); const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) upload(f) })
+  remove.addEventListener('click', () => {
+    m.file = ''; m.poster = ''; showNotes([]); status.textContent = ''
+    bgCommit(); paintFine(); lockSlug(); changed(); fileIn.focus()
+  })
+  return h('div', null, wrap, fine)
+}
+
+function styleFields() {
+  const { D, st } = E
+  const keys = Object.keys(st.style || {})
+  const rows = {}
+  const box = h('div', { class: 'style-grid', 'data-part': 'style-grid' })
+  for (const k of keys) {
+    const sel = h('select', { class: 'in', 'data-part': `style-${k}`, 'aria-label': STYLE_LABEL[k] || k },
+      h('option', { value: '' }, 'Look default'), st.style[k].map((v) => h('option', { value: v }, cap(v))))
+    sel.value = D.style[k] && st.style[k].includes(D.style[k]) ? D.style[k] : ''
+    sel.addEventListener('change', () => { if (sel.value) D.style[k] = sel.value; else delete D.style[k]; changed() })
+    const note = h('p', { class: 'hint style-note' })
+    const id = `f${++fid}`
+    sel.id = id
+    rows[k] = { sel, note }
+    box.append(h('div', { class: 'f style-opt', dataset: { path: `style.${k}`, key: k } }, h('label', { for: id }, STYLE_LABEL[k] || k), sel, note, h('p', { class: 'err' })))
+  }
+  const reset = h('button', { class: 'btn btn-sm', type: 'button', 'data-part': 'style-reset', onclick: () => { D.style = {}; paintStyle(); changed() } }, 'Reset to look default')
+  const paintStyle = () => {
+    const look = st.looks.find((l) => l.id === D.look)
+    for (const k of keys) {
+      const { sel, note } = rows[k]
+      const c = styleControl(look, k)
+      sel.disabled = !c.enabled
+      const dv = look && look.styleDefaults ? look.styleDefaults[k] : null
+      sel.options[0].textContent = dv ? `Look default (${dv})` : 'Look default'
+      sel.value = D.style[k] && st.style[k].includes(D.style[k]) ? D.style[k] : ''
+      note.textContent = c.note
+      note.hidden = c.enabled
+    }
+    reset.disabled = !Object.keys(D.style).length
+  }
+  E.els.stylePaint = paintStyle
+  paintStyle()
+  return [box, h('div', { class: 'img-acts' }, reset)]
+}
+
+/* ----- 08 blocks */
 const BLOCK_ICON = { link: 'link', heading: 'heading', text: 'text', socials: 'socials', video: 'video' }
 const FIRST_PART = { link: 'url', heading: 'text', text: 'text', socials: 'kind-0', video: 'url' }
 const HEAD_PARTS = ['toggle', 'up', 'down', 'remove']
