@@ -15,11 +15,13 @@ let root, server, base, publishCalls, publishImpl
 const exists = (p) => access(p).then(() => true, () => false)
 const H = { 'x-khybrio-studio': '1', 'content-type': 'application/json' }
 
+// Accent #f2c14e passes all three v2 contrast checks on this bg, so valid() yields zero warnings.
+// (Brand coral #e8622d on teal-deep is 2.81:1 accent/bg: a warning by spec section 4.)
 const valid = (slug, extra = {}) => ({
   slug,
   name: `Client ${slug}`,
   look: 'card',
-  theme: { bg: '#1c4d4a', ink: '#f5f7f6', accent: '#e8622d' },
+  theme: { bg: '#1c4d4a', ink: '#f5f7f6', accent: '#f2c14e' },
   blocks: [{ type: 'link', kind: 'website', url: `https://example.com/${slug}` }],
   ...extra,
 })
@@ -330,7 +332,8 @@ test('rename moves the folder, rewrites slug, records the redirect', async () =>
   assert.deepEqual(await res.json(), { ok: true, slug: 'beta-cafe' })
   assert.ok(!(await exists(join(root, 'clients', 'alpha-cafe'))))
   assert.equal(await readFile(join(root, 'clients', 'beta-cafe', 'logo.svg'), 'utf8'), '<svg/>')
-  assert.deepEqual(await importBack(join(root, 'clients', 'beta-cafe', 'client.js')), valid('beta-cafe', { logo: 'logo.svg' }))
+  // Spec section 8: rename rewrites only `slug`; name and urls stay as they were.
+  assert.deepEqual(await importBack(join(root, 'clients', 'beta-cafe', 'client.js')), { ...valid('alpha-cafe', { logo: 'logo.svg' }), slug: 'beta-cafe' })
   assert.deepEqual(await readRedirects(), { 'alpha-cafe': 'beta-cafe' })
   const s = await (await api('/api/state')).json()
   assert.deepEqual(s.clients.map((c) => c.slug), ['beta-cafe'])
