@@ -136,19 +136,19 @@ test('gradient: data-bg on html, an empty aria-hidden kb layer first in body', (
 
 test('gradient css: refs stay variables, free hex stays hex, angle and stop order kept', () => {
   const html = page({ background: GRAD([stop('bg', '#fff4e6'), stop('accent', '#e8622d'), stop(null, '#abcdef')], 'linear', 135) })
-  const grad = squash(css(html)).match(/linear-gradient\([^)]*\)/)
+  const grad = squash(css(html)).match(/linear-gradient\((?:[^()]|\([^()]*\))*\)/)
   assert.ok(grad, 'no linear-gradient in css')
   assert.equal(grad[0], 'linear-gradient(135deg,var(--bg),var(--accent),#abcdef)')
 })
 
 test('gradient css: default angle 180, two stops, ink ref', () => {
   const html = page({ background: GRAD([stop('ink', '#3b1f14'), stop('bg', '#fff4e6')]) })
-  assert.equal(squash(css(html)).match(/linear-gradient\([^)]*\)/)[0], 'linear-gradient(180deg,var(--ink),var(--bg))')
+  assert.equal(squash(css(html)).match(/linear-gradient\((?:[^()]|\([^()]*\))*\)/)[0], 'linear-gradient(180deg,var(--ink),var(--bg))')
 })
 
 test('radial gradient css', () => {
   const html = page({ background: GRAD([stop('bg', '#fff4e6'), stop(null, '#112233')], 'radial') })
-  const g = squash(css(html)).match(/radial-gradient\([^)]*\)/)
+  const g = squash(css(html)).match(/radial-gradient\((?:[^()]|\([^()]*\))*\)/)
   assert.ok(g, 'no radial-gradient in css')
   assert.equal(g[0], 'radial-gradient(130%90%at50%0%,var(--bg),#112233)')
   assert.ok(!squash(css(html)).includes('linear-gradient'))
