@@ -45,7 +45,26 @@ async function takeLock(root) {
 
 const fail = (output) => ({ ok: false, output, live: { uploaded: [], deleted: [], ms: 0 }, backup: 'nothing', push: null })
 
-export async function publishLive({ root, site, store, git, force = false } = {}) {
+function redactAll(result, secrets) {
+  const list = secrets.filter((v) => typeof v === 'string' && v.length >= 4).sort((a, b) => b.length - a.length)
+  if (!list.length || typeof result?.output !== 'string') return result
+  let out = result.output
+  for (const v of list) out = out.split(v).join('[redacted]')
+  return { ...result, output: out }
+}
+
+export async function publishLive(args = {}) {
+  const secrets = [...(args.secrets ?? [])]
+  try {
+    if (args.root) {
+      const res = loadEnv(args.root)
+      secrets.push(...Object.values(res.env ?? {}))
+    }
+  } catch {}
+  return redactAll(await publishLiveInner(args), secrets)
+}
+
+async function publishLiveInner({ root, site, store, git, force = false } = {}) {
   if (!site || site.base !== '/') return fail('Publish needs site base "/" (a root domain). Current base is not "/".')
 
   if (!store) {

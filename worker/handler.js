@@ -38,6 +38,7 @@ export async function handle(request, bucket) {
   }
   if (/%2f|%5c/i.test(path) || !path.startsWith('/')) return notFound(request, bucket)
 
+  if (path.length > 400) return notFound(request, bucket)
   const parts = path.slice(1).split('/')
   const trailing = parts.length > 1 && parts[parts.length - 1] === ''
   const segs = trailing ? parts.slice(0, -1) : parts
@@ -47,6 +48,7 @@ export async function handle(request, bucket) {
   } catch {
     return notFound(request, bucket)
   }
+  if (decoded.some((s) => s.length > 200 || /[\u0000-\u001f\u007f]/.test(s))) return notFound(request, bucket)
   if (decoded.some((s) => s === '' || s.startsWith('_') || s.startsWith('.') || s.includes('/') || s.includes('\\'))) {
     return notFound(request, bucket)
   }

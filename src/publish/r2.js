@@ -1,7 +1,10 @@
 import { AwsClient } from 'aws4fetch'
 
+const cp = (n, orig) => (n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : orig)
 const decode = (s) =>
-  s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+  s.replace(/&#x([0-9a-f]+);/gi, (m, h) => cp(parseInt(h, 16), m))
+    .replace(/&#(\d+);/g, (m, d) => cp(Number(d), m))
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
 const encKey = (key) => key.split('/').map(encodeURIComponent).join('/')
 
 export function createR2Store({ accountId, bucket, accessKeyId, secretAccessKey, fetch: fetchFn = globalThis.fetch }) {

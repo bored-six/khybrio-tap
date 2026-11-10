@@ -80,11 +80,14 @@ async function readBody(req, limit) {
 
 async function readJson(req) {
   const buf = await readBody(req, MAX_JSON)
+  let parsed
   try {
-    return buf.length ? JSON.parse(buf.toString('utf8')) : {}
+    parsed = buf.length ? JSON.parse(buf.toString('utf8')) : {}
   } catch {
     throw new HttpError(400, { error: 'Invalid JSON' })
   }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new HttpError(400, { error: 'Body must be a JSON object' })
+  return parsed
 }
 
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k)
