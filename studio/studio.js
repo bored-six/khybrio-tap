@@ -1,15 +1,22 @@
 // Khybrio Studio front end. Vanilla ES module, no build step, no dependencies.
-// Talks to src/studio/server.js (contract: "Studio" in .claude/specs/contract.md).
+// Talks to src/studio/server.js (contract: "Studio" in .claude/specs/contract.md, v2 delta in mvp-showcase.md).
 // Screens: #/ (home), #/new, #/edit/<slug>.
+//
+// Layout of this file, so a restyle never has to touch the logic:
+//   - DATA LOGIC (do not restyle): api(), loadState(), payload/fromData (studio/editor-model.js), save(), renameTo(),
+//     runPublish(), runPreview(), the block/palette/font rules in studio/editor-model.js.
+//   - PRESENTATION: everything that calls h(...) to build markup, the class names, the icons.
 
-import { switchKind } from './link-rules.js'
+import { switchKind, placeholderFor } from './link-rules.js'
+import {
+  BLOCK_TYPES, normHex, slugProblem, renameGate, canAdd, addBlock, moveBlock, removeBlock,
+  addSocialItem, removeSocialItem, socialKinds, countByType, payload, fromData, blankDraft,
+  groupFonts, fontFaceCss, previewFamily, applyPalette, matchPalette,
+} from './editor-model.js'
 
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
-const RESERVED = ['assets', 'fonts', '404', 'index']
-const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i
 const ASSET_RE = /^[a-z0-9][a-z0-9._-]*\.(svg|png|jpe?g|webp)$/i
 const MAX_ASSET = 3 * 1024 * 1024
-const MAX_LINKS = 12
 const MAX_BRANCHES = 10
 const PREVIEW_DELAY = 300
 
@@ -60,6 +67,11 @@ const G = {
 // QR: three finder squares, the data corner is the dot
 G.qr = '<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.5"/><path d="M14 14h2.75v2.75M20.5 14v6.5H14"/>' + dot(17.5, 17.5)
 G.pin = G.maps
+// block-type glyphs: H, lines, three dots, play frame
+G.heading = '<path d="M6.5 5v14M17.5 5v14M6.5 12h11"/>'
+G.text = '<path d="M4.5 7h15M4.5 12h15M4.5 17h9"/>'
+G.socials = '<path d="M6 12h.01M12 12h.01M18 12h.01"/>'
+G.video = '<rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M10.25 9.5v5l4.25-2.5z"/>'
 
 const svgMarkup = (name) =>
   `<svg class="ic" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75" ` +
@@ -125,11 +137,6 @@ async function loadState() {
 }
 
 /* ---------------------------------------------------------------- colour + text helpers */
-function normHex(s) {
-  s = String(s || '').trim().toLowerCase()
-  if (!HEX_RE.test(s)) return null
-  return s.length === 4 ? '#' + [...s.slice(1)].map((c) => c + c).join('') : s
-}
 function lum(hex) {
   const n = parseInt(hex.slice(1), 16)
   const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
@@ -148,51 +155,60 @@ function slugify(s) {
   if (out.length > 40) out = out.slice(0, 40).replace(/-+$/, '')
   return out
 }
-const slugProblem = (s) =>
-  !s ? 'Pick an address' :
-  !SLUG_RE.test(s) || s.length < 2 || s.length > 40 ? 'Use 2 to 40 lowercase letters, digits and single dashes' :
-  RESERVED.includes(s) ? `"${s}" is reserved, pick another` : null
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`
 const str = (v) => (typeof v === 'string' ? v : '')
 const liveUrlFor = (site, slug) => `${site.origin}${site.base}${slug}/`
 
 /* ---------------------------------------------------------------- error wording */
-// API errors are "path: message". Paths drive placement; wording is softened for the owner.
+// API errors and warnings are "path: message". Paths drive placement; wording is softened for the owner.
 function parseError(e) {
-  const m = String(e).match(/^([A-Za-z_$][\w$]*(?:\[\d+\])?(?:\.[\w$]+)?)\s*:\s*([\s\S]*)$/)
+  const m = String(e).match(/^([A-Za-z_$][\w$]*(?:\[\d+\]|\.[\w$]+)*)\s*:\s*([\s\S]*)$/)
   return m ? { path: m[1], msg: m[2] } : { path: '', msg: String(e) }
 }
 const FIELD_NAMES = {
   slug: 'Page address', name: 'Name', tagline: 'Tagline', look: 'Look', theme: 'Colours',
   'theme.bg': 'Background', 'theme.ink': 'Text colour', 'theme.accent': 'Accent', font: 'Fonts',
-  'font.display': 'Display font', 'font.body': 'Body font', logo: 'Logo', cover: 'Cover',
-  links: 'Links', branches: 'Branches', credit: 'Credit',
+  'font.heading': 'Heading font', 'font.tagline': 'Tagline font', 'font.body': 'Body font', logo: 'Logo', cover: 'Cover',
+  blocks: 'Blocks', branches: 'Branches', credit: 'Credit',
 }
-const SUB = { url: 'link address', label: 'button text', kind: 'kind', name: 'name', address: 'address', hours: 'hours', maps: 'maps link' }
+const SUB = { url: 'address', label: 'button text', kind: 'kind', text: 'text', items: 'icons', name: 'name', address: 'address', hours: 'hours', maps: 'maps link' }
+const TYPE_NAME = { link: 'Link', heading: 'Heading', text: 'Text', socials: 'Socials', video: 'Video' }
 function pathName(p) {
-  const m = p.match(/^(links|branches)\[(\d+)\](?:\.(\w+))?$/)
-  if (m) return `${m[1] === 'links' ? 'Link' : 'Branch'} ${Number(m[2]) + 1}${m[3] ? `, ${SUB[m[3]] || m[3]}` : ''}`
+  let m = p.match(/^branches\[(\d+)\](?:\.(\w+))?$/)
+  if (m) return `Branch ${Number(m[1]) + 1}${m[2] ? `, ${SUB[m[2]] || m[2]}` : ''}`
+  m = p.match(/^blocks\[(\d+)\](?:\.items\[(\d+)\])?(?:\.(\w+))?$/)
+  if (m) {
+    const b = E && E.D.blocks[m[1]]
+    return `${b ? TYPE_NAME[b.type] : 'Block'} ${Number(m[1]) + 1}${m[2] !== undefined ? `, icon ${Number(m[2]) + 1}` : ''}${m[3] ? `, ${SUB[m[3]] || m[3]}` : ''}`
+  }
   return FIELD_NAMES[p] || p || 'Page'
 }
 function humanMsg(path, msg) {
   let m
   if (path === 'slug' && E && !E.D.slug) return 'Pick an address'
   if (/^must be 2-40 chars/.test(msg)) return 'Use 2 to 40 lowercase letters, digits and single dashes'
+  const bu = path.match(/^blocks\[(\d+)\]\.url$/)
+  const blk = bu && E && E.D.blocks[bu[1]]
+  if (blk && typeof blk.url === 'string' && !blk.url.trim()) return blk.type === 'video' ? 'Add the video link' : 'Add the link address'
+  const bl = path.match(/^blocks\[(\d+)\]\.label$/)
+  const lb = bl && E && E.D.blocks[bl[1]]
+  if (lb && lb.kind === 'custom' && !lb.label.trim()) return 'A custom link needs button text'
   if (/^required string$|^required$/.test(msg)) return path.endsWith('.url') ? 'Add the link address' : 'Required'
-  const li = path.match(/^links\[(\d+)\]\.url$/)
-  if (li && E && E.D.links[li[1]] && !E.D.links[li[1]].url.trim()) return 'Add the link address'
   if ((m = msg.match(/must be a valid (\w+:) URL/))) {
     if (m[1] === 'tel:') return 'Start with tel: then the number, like tel:+639171234567'
     if (m[1] === 'mailto:') return 'Start with mailto: then the email, like mailto:hello@shop.ph'
+    if (m[1] === 'viber:') return 'Start with viber://chat?number=%2B639171234567'
     return 'Must be a full web address starting with https://'
   }
   if (/must not contain whitespace/.test(msg)) return 'Remove the spaces from the address'
-  if ((m = msg.match(/contrast against bg is ([\d.]+):1/))) return `Text is only ${m[1]}:1 on the background. Needs 4.5:1, go darker or lighter.`
-  if ((m = msg.match(/best text contrast on accent is ([\d.]+):1/))) return `Button text is only ${m[1]}:1 on the accent. Needs 3:1.`
+  if ((m = msg.match(/contrast against bg is ([\d.]+):1/))) return `Text is only ${m[1]}:1 on the background. 4.5:1 is easier to read, go darker or lighter.`
+  if ((m = msg.match(/best text contrast on accent is ([\d.]+):1/))) return `Button text is only ${m[1]}:1 on the accent. 3:1 is easier to read.`
+  if ((m = msg.match(/accent against bg is ([\d.]+):1/))) return `The button is only ${m[1]}:1 against the background. 3:1 helps it stand out.`
   if (/must be a hex colour/.test(msg)) return 'Use a hex colour like #1c4d4a'
   if ((m = msg.match(/file "(.+)" not found/))) return `"${m[1]}" is not in this page's folder. Upload it again.`
-  if (/need 1 to 12 items/.test(msg)) return 'Add at least one link (12 at most)'
+  if (/need 1 to \d+ items/.test(msg) && path === 'blocks') return 'A page needs at least one block (30 at most)'
   if (/must be an https:\/\/ URL/.test(msg)) return 'Must be a full https:// address'
+  if (/^Client already exists$/.test(msg)) return 'Another page already uses this address. Pick another.'
   if (/must equal the folder name/.test(msg)) return 'Address does not match this page'
   return msg
 }
@@ -255,14 +271,8 @@ async function screenHome() {
     h('a', { class: 'btn btn-primary btn-big', href: '#/new' }, icon('plus'), 'New page')))
 
   if (pending.size) main.append(publishBar(pending.size))
-  if (S.flash) {
-    const f = S.flash
-    S.flash = null
-    const note = h('div', { class: `note${f.bad ? ' bad' : ''}`, role: 'status' }, icon(f.bad ? 'warn' : 'check'),
-      h('p', null, h('strong', null, f.title), ' ', h('span', null, f.text || '')),
-      h('button', { class: 'btn btn-ghost btn-sm btn-icon x', 'aria-label': 'Dismiss', onclick: () => note.remove() }, icon('close')))
-    main.append(note)
-  }
+  if (S.flash) { const f = S.flash; S.flash = null; main.append(flashNote(f)) }
+  { const bn = backupNote(st.backup); if (bn) main.append(bn) }
 
   const rack = h('ul', { class: 'rack', 'aria-label': 'Client pages' })
   if (!st.clients.length) {
@@ -298,7 +308,7 @@ function clientCard(c, lookLabel, isPending) {
   const meta = h('p', { class: 'cc-meta' },
     h('span', { class: 'slug' }, c.slug),
     c.look && lookLabel[c.look] ? [h('span', { class: 'sep', 'aria-hidden': 'true' }), h('span', null, lookLabel[c.look])] : null,
-    typeof c.linkCount === 'number' ? [h('span', { class: 'sep', 'aria-hidden': 'true' }), h('span', null, plural(c.linkCount, 'link'))] : null)
+    h('span', { class: 'sep', 'aria-hidden': 'true' }), h('span', null, plural(c.blockCount ?? 0, 'block')))
 
   const copyBtn = h('button', { class: 'btn btn-sm', type: 'button' }, icon('copy'), h('span', null, 'Copy link'))
   copyBtn.addEventListener('click', async () => {
@@ -356,125 +366,87 @@ async function copyText(text) {
   } catch { return false }
 }
 
+// DATA: one publish call. Returns the server answer (or a stand-in on network failure).
+const callPublish = (force) => api('/api/publish', { method: 'POST', json: force ? { force: true } : {} })
+
+const BACKUP_WORDS = {
+  committed: 'saved to git, pushing to GitHub in the background',
+  nothing: 'nothing new to back up',
+  failed: 'the git backup failed (the live site is fine)',
+}
+function publishSummary(d) {
+  const l = d.live || {}
+  const up = Array.isArray(l.uploaded) ? l.uploaded.length : Number(l.uploaded) || 0
+  const del = Array.isArray(l.deleted) ? l.deleted.length : Number(l.deleted) || 0
+  return `${plural(up, 'file')} uploaded, ${del} removed, ${Number(l.ms) || 0} ms. Backup: ${BACKUP_WORDS[d.backup] || d.backup || 'unknown'}.`
+}
+function publishFailure(r) {
+  const d = r.data
+  if (d && d.output) return String(d.output)
+  if (d && d.error) return String(d.error)
+  return r.offline ? 'The studio server is not running.' : `The server answered ${r.status}.`
+}
+
+// PRESENTATION + wiring for the home screen's publish bar.
 function publishBar(n) {
   const btn = h('button', { class: 'btn btn-cream', type: 'button' }, icon('tap'), h('span', null, 'Publish live'))
   const bar = h('section', { class: 'pub on-teal', 'aria-label': 'Publish' },
     h('span', { class: 'wet', 'aria-hidden': 'true' }),
     h('p', null, h('strong', null, `${plural(n, 'page')} changed.`), ' ', h('span', null, 'Saved here, not on the cards yet.')),
     btn)
-  btn.addEventListener('click', async () => {
+  const run = async (force) => {
     bar.querySelector('.pub-out')?.remove()
     btn.disabled = true
     btn.setAttribute('aria-busy', 'true')
     bar.classList.add('working')
     btn.querySelector('span').textContent = 'Publishing'
     say('Publishing')
-    const r = await api('/api/publish', { method: 'POST', json: {} })
+    const r = await callPublish(force)
     if (r.data && r.data.ok) {
-      S.flash = { title: 'Published.', text: 'The live pages update within a few minutes.' }
-      say('Published')
+      const d = r.data
+      S.flash = { bad: false, title: 'Live.', text: publishSummary(d) }
+      say(`Published. ${publishSummary(d)}`)
       return screenHome()
     }
     bar.classList.remove('working')
     btn.disabled = false
     btn.removeAttribute('aria-busy')
     btn.querySelector('span').textContent = 'Try again'
-    const out = r.data && r.data.output ? String(r.data.output) : r.offline ? 'The studio server is not running.' : `The server answered ${r.status}.`
-    bar.append(h('div', { class: 'pub-out', role: 'alert' }, h('strong', null, icon('warn'), 'Publish failed. Nothing new is live.'), h('pre', null, out)))
+    const out = publishFailure(r)
+    const box = h('div', { class: 'pub-out', role: 'alert' }, h('strong', null, icon('warn'), 'Publish failed. Nothing new is live.'), h('pre', null, out))
+    if (/Refusing to delete/.test(out)) {
+      box.append(h('button', {
+        class: 'btn btn-sm', type: 'button', 'data-part': 'force-publish',
+        onclick: () => { if (confirm(`${out}\n\nPublish anyway? Those pages will disappear from the live site.`)) run(true) },
+      }, 'Publish anyway'))
+    }
+    bar.append(box)
     say('Publish failed')
-  })
+  }
+  btn.addEventListener('click', () => run(false))
   return bar
 }
 
-/* ---------------------------------------------------------------- editor model */
-let rowId = 0
-const PLACEHOLDER = {
-  review: 'https://g.page/r/your-place/review',
-  maps: 'https://maps.app.goo.gl/...',
-  menu: 'https://...',
-  booking: 'https://...',
-  order: 'https://...',
-  website: 'https://yourshop.ph',
-  messenger: 'https://m.me/yourpage',
-  facebook: 'https://facebook.com/yourpage',
-  instagram: 'https://instagram.com/yourhandle',
-  tiktok: 'https://tiktok.com/@yourhandle',
-  phone: 'tel:+639171234567',
-  email: 'mailto:hello@yourshop.ph',
-}
-const placeholderFor = (kind, scheme) => PLACEHOLDER[kind] || (scheme === 'tel:' ? 'tel:+63...' : scheme === 'mailto:' ? 'mailto:...' : 'https://...')
-
-const newLink = (kind = 'messenger') => ({ id: ++rowId, kind, url: '', label: '' })
-const newBranch = () => ({ id: ++rowId, name: '', address: '', hours: '', maps: '' })
-
-function pickId(list, want) {
-  const ids = list.map((x) => x.id)
-  return ids.includes(want) ? want : ids[0]
+function flashNote(f) {
+  const note = h('div', { class: `note${f.bad ? ' bad' : ''}`, role: 'status' }, icon(f.bad ? 'warn' : 'check'),
+    h('p', null, h('strong', null, f.title), ' ', h('span', null, f.text || '')),
+    h('button', { class: 'btn btn-ghost btn-sm btn-icon x', 'aria-label': 'Dismiss', onclick: () => note.remove() }, icon('close')))
+  return note
 }
 
-function blankDraft(st) {
-  const kinds = st.kinds.map((k) => k.id)
-  return {
-    slug: '', name: '', tagline: '',
-    look: pickId(st.looks, 'card'),
-    theme: { bg: '#f5f7f6', ink: '#0f2b29', accent: '#1c4d4a' },
-    font: { display: pickId(st.fonts, 'fraunces'), body: pickId(st.fonts, 'inter') },
-    logo: null, cover: null,
-    links: [newLink(kinds.includes('messenger') ? 'messenger' : kinds[0])],
-    branches: [],
-    credit: true,
-  }
-}
-
-function fromData(data, slug, st) {
-  const d = data && typeof data === 'object' ? data : {}
-  const th = d.theme && typeof d.theme === 'object' ? d.theme : {}
-  const fo = d.font && typeof d.font === 'object' ? d.font : {}
-  const links = Array.isArray(d.links) ? d.links : []
-  const branches = Array.isArray(d.branches) ? d.branches : []
-  return {
-    slug,
-    name: str(d.name), tagline: str(d.tagline),
-    look: str(d.look) || pickId(st.looks, 'card'),
-    theme: { bg: str(th.bg), ink: str(th.ink), accent: str(th.accent) },
-    font: { display: str(fo.display) || pickId(st.fonts, 'fraunces'), body: str(fo.body) || pickId(st.fonts, 'inter') },
-    logo: str(d.logo) || null, cover: str(d.cover) || null,
-    links: links.length ? links.map((l) => ({ id: ++rowId, kind: str(l?.kind) || 'website', url: str(l?.url), label: str(l?.label) })) : [newLink()],
-    branches: branches.map((b) => ({ id: ++rowId, name: str(b?.name), address: str(b?.address), hours: str(b?.hours), maps: str(b?.maps) })),
-    credit: d.credit !== false,
-  }
-}
-
-// Only contract keys, in file order. Empty optionals are dropped, never sent as "".
-function payload(D) {
-  const o = { slug: D.slug, name: D.name.trim() }
-  if (D.tagline.trim()) o.tagline = D.tagline.trim()
-  o.look = D.look
-  const hx = (v) => normHex(v) || String(v).trim()
-  o.theme = { bg: hx(D.theme.bg), ink: hx(D.theme.ink), accent: hx(D.theme.accent) }
-  o.font = { display: D.font.display, body: D.font.body }
-  if (D.logo) o.logo = D.logo
-  if (D.cover) o.cover = D.cover
-  o.links = D.links.map((l) => {
-    const x = { kind: l.kind, url: l.url.trim() }
-    if (l.label.trim()) x.label = l.label.trim()
-    return x
-  })
-  const br = D.branches
-    .map((b) => {
-      const x = {}
-      for (const k of ['name', 'address', 'hours', 'maps']) if (b[k].trim()) x[k] = b[k].trim()
-      return x
-    })
-    .filter((x) => Object.keys(x).length)
-  if (br.length) o.branches = br
-  o.credit = D.credit
-  return o
+function backupNote(b) {
+  if (!b || b.state === 'idle') return null
+  if (b.state === 'pushing') return h('div', { class: 'note', role: 'status' }, icon('tap'), h('p', null, h('strong', null, 'Backup running.'), ' ', h('span', null, 'Pushing the saved pages to GitHub in the background.')))
+  return h('div', { class: 'note bad', role: 'status' }, icon('warn'), h('p', null, h('strong', null, 'GitHub backup failed.'), ' ', h('span', null, 'The live pages are fine. ' + (b.output || ''))))
 }
 
 /* ---------------------------------------------------------------- editor */
 let E = null
+let rowId = 0
+const nextId = () => ++rowId
+const newBranch = () => ({ id: nextId(), name: '', address: '', hours: '', maps: '' })
 
+// DATA: load a page (or a blank draft) and start the editor.
 async function screenEditor(mode, slug) {
   app.replaceChildren(topBar(), h('p', { class: 'boot' }, mode === 'new' ? 'Setting up a new page' : `Opening ${slug}`))
   let st
@@ -489,8 +461,9 @@ async function screenEditor(mode, slug) {
       return screenHome()
     }
     if (!r.ok || !r.data) { app.replaceChildren(...failView(r.offline ? 'The studio server is not running.' : `Could not open ${slug} (server answered ${r.status}).`)); return }
-    D = fromData(r.data.data, slug, st)
-  } else D = blankDraft(st)
+    D = fromData(r.data.data, slug, st, nextId)
+  } else D = blankDraft(st, nextId)
+  ensureFontFaces(st)
 
   E = {
     mode, st, D,
@@ -498,6 +471,7 @@ async function screenEditor(mode, slug) {
     slugTouched: false,
     uploaded: false,
     errors: [],
+    warnings: [],
     lastHtml: null,
     seq: 0, applied: 0, timer: 0,
     saving: false,
@@ -522,6 +496,7 @@ async function screenEditor(mode, slug) {
 
 const isDirty = () => E && JSON.stringify(payload(E.D)) !== E.initial
 
+// Every edit handler ends here.
 function changed() {
   const dirty = isDirty()
   E.els.state.textContent = dirty ? 'Unsaved changes' : E.mode === 'new' ? 'Not saved yet' : 'Saved'
@@ -530,6 +505,16 @@ function changed() {
   E.timer = setTimeout(runPreview, PREVIEW_DELAY)
   E.els.pulse.className = 'pulse busy'
   E.els.pulseText.textContent = 'Updating'
+  E.els.address?.refresh()
+}
+
+// The preview font faces, so each font option can show itself. Loaded lazily by the browser, only when used.
+function ensureFontFaces(st) {
+  if (document.getElementById('studio-font-faces')) return
+  const el = document.createElement('style')
+  el.id = 'studio-font-faces'
+  el.textContent = fontFaceCss(st.fonts)
+  document.head.append(el)
 }
 
 function buildEditor() {
@@ -553,7 +538,9 @@ function buildEditor() {
   })
   E.els.form = form
   E.els.summary = h('div', { class: 'summary', role: 'alert', hidden: true })
-  form.append(E.els.summary)
+  E.els.warnSummary = h('div', { class: 'summary summary-warn', role: 'status', hidden: true })
+  form.append(E.els.summary, E.els.warnSummary)
+  if (S.flash) { form.append(flashNote(S.flash)); S.flash = null }
 
   let n = 0
   const sec = (title, hint, ...body) =>
@@ -565,9 +552,9 @@ function buildEditor() {
     sec('Name', null, nameFields()),
     sec('Look', null, lookTiles()),
     sec('Colours', null, colourFields()),
-    sec('Type', null, fontTiles()),
+    sec('Type', 'Heading is the name and headings, tagline is the line under the name, body is everything else.', fontPickers()),
     sec('Images', 'SVG, PNG, JPG or WebP, up to 3 MB. Use JPG or WebP for the cover: Facebook ignores SVG previews.', imageFields()),
-    sec('Links', 'The first link is the main button. The rest follow in this order.', linkSection()),
+    sec('Blocks', 'The page shows these top to bottom. The first link is the main button.', blockSection()),
     sec('Branches', 'Optional. Leave empty for a single shop with no address shown.', branchSection()),
     sec('Footer', null, creditField()),
     h('div', { class: 'form-end' },
@@ -602,14 +589,7 @@ function addressField() {
     urlLine.replaceChildren(`${st.site.origin}${st.site.base}`, h('strong', null, D.slug || 'your-address'), '/')
   }
   paintUrl()
-  if (mode === 'edit') {
-    const ctl = input({ value: D.slug, readOnly: true })
-    return field({
-      label: 'Page address', path: 'slug',
-      control: ctl,
-      hint: h('span', null, 'Locked: cards already point here. Live at ', urlLine),
-    })
-  }
+  if (mode === 'edit') return renameField(pre, paintUrl, urlLine)
   const ctl = input({ value: D.slug, maxlength: 40, placeholder: 'your-address', inputmode: 'url' })
   ctl.addEventListener('input', () => {
     const clean = ctl.value.toLowerCase().replace(/[^a-z0-9-]/g, '-')
@@ -624,7 +604,7 @@ function addressField() {
   E.els.slug = { ctl, box, paintUrl, lockNote }
   const f = field({
     label: 'Page address', path: 'slug', control: ctl,
-    hint: h('span', null, 'Live at ', urlLine, '. It goes on the NFC chip, so it cannot change once a card is written.'),
+    hint: h('span', null, 'Live at ', urlLine, '. Pick it before you write a card: later changes keep the old address forwarding here.'),
     extra: lockNote,
   })
   // the control sits inside .addr; move it there after field() wired the label/aria
@@ -638,6 +618,70 @@ function lockSlug() {
   E.els.slug.ctl.readOnly = locked
   E.els.slug.box.classList.toggle('locked', locked)
   E.els.slug.lockNote.hidden = !locked
+}
+
+// Edit mode: the address can change, but only through the rename route, and only with nothing unsaved.
+function renameField(pre, paintUrl, urlLine) {
+  const { D } = E
+  const from = D.slug
+  const ctl = input({ value: from, maxlength: 40, inputmode: 'url', 'data-part': 'rename-input' })
+  const btn = h('button', { class: 'btn', type: 'button', 'data-part': 'rename-go' }, icon('edit'), 'Change address')
+  const note = h('p', { class: 'hint rename-note', 'aria-live': 'polite' })
+  const err = h('p', { class: 'err rename-err', role: 'alert' })
+  const box = h('div', { class: 'addr addr-rename' }, h('span', { class: 'addr-pre', 'aria-hidden': 'true' }, pre), ctl, btn)
+  const refresh = () => {
+    const to = ctl.value.trim()
+    const dirty = isDirty()
+    const g = renameGate({ from, to, dirty })
+    ctl.disabled = dirty
+    btn.disabled = !g.ok
+    note.textContent = dirty
+      ? 'Save your changes first, then you can change the address.'
+      : g.reason || 'Cards already written keep working: the old address forwards to the new one.'
+    paintUrl()
+  }
+  E.els.address = { ctl, btn, note, err, refresh }
+  ctl.addEventListener('input', () => {
+    const clean = ctl.value.toLowerCase().replace(/[^a-z0-9-]/g, '-')
+    if (clean !== ctl.value) ctl.value = clean
+    err.replaceChildren()
+    refresh()
+  })
+  btn.addEventListener('click', () => renameTo(ctl.value.trim()))
+  const f = field({
+    label: 'Page address', path: 'slug', control: ctl,
+    hint: h('span', null, 'Live at ', urlLine),
+    extra: [note, err],
+  })
+  f.replaceChild(box, ctl)
+  box.insertBefore(ctl, btn)
+  refresh()
+  return f
+}
+
+// DATA: rename = POST, then reload the editor at the new address. The old one keeps working (server leaves a redirect).
+async function renameTo(to) {
+  const ed = E
+  const from = ed.D.slug
+  const g = renameGate({ from, to, dirty: isDirty() })
+  if (!g.ok) return
+  const { btn, err } = ed.els.address
+  if (!confirm(`Change the address from "${from}" to "${to}"?\n\nThe old address keeps working: it forwards to the new one, so cards already written are fine.`)) return
+  btn.disabled = true
+  btn.setAttribute('aria-busy', 'true')
+  err.replaceChildren()
+  const r = await api(`/api/clients/${from}/rename`, { method: 'POST', json: { to } })
+  if (ed !== E) return
+  btn.removeAttribute('aria-busy')
+  if (r.ok && r.data && r.data.ok) {
+    S.flash = { title: 'Address changed.', text: `This page is now at ${to}. ${from} still forwards here. Publish to put it live.` }
+    S.state = null
+    guard = null
+    location.hash = `#/edit/${r.data.slug}`
+    return
+  }
+  err.replaceChildren(icon('warn'), h('span', null, r.data && r.data.error ? r.data.error : r.offline ? 'The studio server is not running.' : `Could not change the address (server answered ${r.status}).`))
+  ed.els.address.refresh()
 }
 
 /* ----- 02 name */
@@ -726,7 +770,18 @@ function paintTiles() {
 
 /* ----- 04 colours */
 function colourFields() {
-  const { D } = E
+  const { D, st } = E
+  E.els.colour = {}
+  const chips = h('div', { class: 'palettes', role: 'group', 'aria-label': 'Colour presets' },
+    st.palettes.map((p) => h('button', {
+      class: 'pal', type: 'button', 'data-palette': p.id, 'aria-pressed': 'false',
+      title: `${p.label}: background ${p.bg}, text ${p.ink}, accent ${p.accent}`,
+      onclick: () => pickPalette(p),
+    },
+    h('span', { class: 'pal-sw', 'aria-hidden': 'true' },
+      h('i', { style: { background: p.bg } }), h('i', { style: { background: p.ink } }), h('i', { style: { background: p.accent } })),
+    h('span', { class: 'pal-name' }, p.label))))
+  E.els.palettes = chips
   const rows = [
     ['bg', 'Background', 'The page itself'],
     ['ink', 'Text', 'Name, links, everything you read'],
@@ -734,6 +789,7 @@ function colourFields() {
   ].map(([k, label, hint]) => {
     const pick = h('input', { type: 'color', value: normHex(D.theme[k]) || '#000000', 'aria-label': `${label} colour picker` })
     const hex = input({ value: D.theme[k], maxlength: 7, placeholder: '#1c4d4a', 'aria-label': `${label} hex value` })
+    E.els.colour[k] = { pick, hex }
     pick.addEventListener('input', () => { hex.value = D.theme[k] = pick.value; afterColour() })
     hex.addEventListener('input', () => {
       let v = hex.value.trim()
@@ -755,9 +811,26 @@ function colourFields() {
   const ratios = h('div', { class: 'ratios', 'aria-live': 'polite' })
   E.els.ratios = ratios
   paintRatios()
-  return [h('div', { class: 'colours' }, rows), ratios]
+  paintPalettes()
+  return [chips, h('div', { class: 'colours' }, rows), ratios]
 }
-function afterColour() { paintRatios(); paintTiles(); changed() }
+// A preset only fills the three colours. They stay free to edit afterwards.
+function pickPalette(p) {
+  E.D.theme = applyPalette(E.D.theme, p)
+  for (const k of ['bg', 'ink', 'accent']) {
+    const c = E.els.colour[k]
+    c.hex.value = E.D.theme[k]
+    const n = normHex(E.D.theme[k])
+    if (n) c.pick.value = n
+  }
+  say(`${p.label} colours applied`)
+  afterColour()
+}
+function paintPalettes() {
+  const hit = matchPalette(E.D.theme, E.st.palettes)
+  for (const b of E.els.palettes.querySelectorAll('[data-palette]')) b.setAttribute('aria-pressed', String(b.dataset.palette === hit))
+}
+function afterColour() { paintRatios(); paintTiles(); paintPalettes(); changed() }
 function paintRatios() {
   const t = E.D.theme
   const bg = normHex(t.bg), ink = normHex(t.ink), ac = normHex(t.accent)
@@ -777,25 +850,27 @@ function paintRatios() {
 }
 
 /* ----- 05 type */
-const FONT_STACK = {
-  fraunces: 'Fraunces, Georgia, serif',
-  inter: 'Inter, system-ui, sans-serif',
-  'space-grotesk': '"Space Grotesk", system-ui, sans-serif',
-}
-function fontTiles() {
+const FONT_SAMPLE = { heading: 'Your business name', tagline: 'A short line about what you do', body: 'Links and details read like this.' }
+function fontPickers() {
   const { D, st } = E
-  const group = (key, label, sample) => {
-    const wrap = h('div', { class: 'tiles', role: 'radiogroup', 'aria-label': label })
-    for (const f of st.fonts) {
-      const radio = h('input', { type: 'radio', name: `font-${key}`, value: f.id, checked: D.font[key] === f.id })
-      radio.addEventListener('change', () => { if (radio.checked) { D.font[key] = f.id; changed() } })
-      wrap.append(h('label', { class: 'tile' }, radio,
-        h('span', { class: 'spec', style: { 'font-family': FONT_STACK[f.id] || `"${f.family}", system-ui`, 'font-weight': key === 'display' ? '600' : '400' } }, sample),
-        h('span', { class: 'tile-name' }, f.family, frag(svgMarkup('check').replace('class="ic"', 'class="ic tick"')))))
+  const one = (key, label, bodyOnly) => {
+    const sel = h('select', { class: 'in font-select', 'data-part': `font-${key}` })
+    for (const g of groupFonts(st.fonts, { bodyOnly })) {
+      sel.append(h('optgroup', { label: g.label },
+        g.fonts.map((f) => h('option', { value: f.id, style: { 'font-family': `"${previewFamily(f.id)}", system-ui, sans-serif` } }, f.family))))
     }
-    return h('div', { class: 'f', dataset: { path: `font.${key}` } }, h('span', { class: 'lbl' }, label), wrap, h('p', { class: 'err' }))
+    if (![...sel.options].some((o) => o.value === D.font[key])) sel.append(h('option', { value: D.font[key] }, `${D.font[key]} (not available here)`))
+    sel.value = D.font[key]
+    const sample = h('p', { class: 'font-sample', 'aria-hidden': 'true' }, FONT_SAMPLE[key])
+    const paint = () => {
+      sample.style.fontFamily = `"${previewFamily(D.font[key])}", system-ui, sans-serif`
+      sample.style.fontWeight = key === 'heading' ? '600' : '400'
+    }
+    paint()
+    sel.addEventListener('change', () => { D.font[key] = sel.value; paint(); changed() })
+    return field({ label, path: `font.${key}`, control: sel, extra: sample })
   }
-  return [group('display', 'Display: the name and headings', 'Aa'), group('body', 'Body: links and details', 'Aa')]
+  return [one('heading', 'Heading font', false), one('tagline', 'Tagline font', false), one('body', 'Body font', true)]
 }
 
 /* ----- 06 images */
@@ -862,116 +937,239 @@ function imageField(key, label, hint) {
   return wrap
 }
 
-/* ----- 07 links */
-function linkSection() {
-  const list = h('ol', { class: 'rows', 'aria-label': 'Links' })
-  const add = h('button', { class: 'btn', type: 'button' }, icon('plus'), 'Add link')
-  const left = h('span', { class: 'hint' })
-  E.els.links = { list, add, left }
-  add.addEventListener('click', () => {
-    if (E.D.links.length >= MAX_LINKS) return
-    const used = new Set(E.D.links.map((l) => l.kind))
-    const next = ['phone', 'facebook', 'instagram', 'maps', 'review', 'website', 'email', 'messenger'].find((k) => !used.has(k)) || 'website'
-    const l = newLink(next)
-    E.D.links.push(l)
-    renderLinks({ id: l.id, part: 'url' })
-    changed()
-  })
-  renderLinks()
-  return h('div', { class: 'f', dataset: { path: 'links' } }, list, h('p', { class: 'err' }), h('div', { class: 'adds' }, add, left))
+/* ----- 07 blocks */
+const BLOCK_ICON = { link: 'arrow', heading: 'heading', text: 'text', socials: 'socials', video: 'video' }
+const FIRST_PART = { link: 'url', heading: 'text', text: 'text', socials: 'kind-0', video: 'url' }
+const kindLabel = (k) => k.label || 'Custom link'
+const schemeInput = (scheme) => (scheme === 'tel:' ? 'tel' : scheme === 'mailto:' ? 'email' : 'url')
+
+function blockSection() {
+  const list = h('ol', { class: 'rows blocks', 'aria-label': 'Blocks' })
+  const menu = h('div', { class: 'add-menu', role: 'group', 'aria-label': 'Add a block' })
+  const count = h('p', { class: 'hint block-count', 'aria-live': 'polite' })
+  const btns = {}
+  for (const t of BLOCK_TYPES) {
+    btns[t.type] = h('button', { class: 'btn', type: 'button', 'data-add': t.type, title: t.hint, onclick: () => addOfType(t) }, icon('plus'), t.label)
+    menu.append(btns[t.type])
+  }
+  E.els.blocks = { list, menu, count, btns }
+  renderBlocks()
+  return h('div', { class: 'f', dataset: { path: 'blocks' } }, list, h('p', { class: 'err' }), h('div', { class: 'adds' }, menu, count))
 }
 
-function renderLinks(focus) {
+function addOfType(t) {
   const { D, st } = E
-  const { list, add, left } = E.els.links
-  const kinds = st.kinds
-  const kindOf = (id) => kinds.find((k) => k.id === id) || { id, label: id, scheme: 'https:' }
+  const r = addBlock(D.blocks, t.type, { limits: st.limits, kinds: st.kinds, nextId })
+  if (!r.ok) { say(r.reason); return }
+  D.blocks = r.blocks
+  const added = D.blocks[D.blocks.length - 1]
+  renderBlocks({ id: added.id, part: FIRST_PART[t.type] })
+  say(`${t.label} block added at position ${D.blocks.length}`)
+  changed()
+}
+
+function renderBlocks(focus) {
+  const { D, st } = E
+  const { list, count, btns } = E.els.blocks
   list.replaceChildren()
-  D.links.forEach((l, i) => {
-    const k = kindOf(l.kind)
-    const n = i + 1
-    const kindIcon = h('span', { class: 'row-ic' }, icon(G[l.kind] ? l.kind : 'arrow'))
-    const sel = h('select', { class: 'in', 'data-part': 'kind' },
-      kinds.map((x) => h('option', { value: x.id }, x.label)),
-      kinds.some((x) => x.id === l.kind) ? null : h('option', { value: l.kind }, `${l.kind} (unknown)`))
-    sel.value = l.kind
-    const url = input({ value: l.url, placeholder: placeholderFor(l.kind, k.scheme), inputmode: k.scheme === 'tel:' ? 'tel' : k.scheme === 'mailto:' ? 'email' : 'url', 'data-part': 'url' })
-    const label = input({ value: l.label, maxlength: 40, placeholder: k.label, spellcheck: 'true', 'data-part': 'label' })
+  const firstLink = D.blocks.findIndex((b) => b.type === 'link')
+  D.blocks.forEach((b, i) => list.append(blockCard(b, i, i === firstLink)))
 
-    const hintEl = h('p', { class: 'hint link-hint', hidden: true, role: 'status' })
-    sel.addEventListener('change', () => {
-      const r = switchKind(l, sel.value, kinds)
-      l.kind = r.kind; l.label = r.label; l.url = r.url
-      const nk = kindOf(l.kind)
-      url.value = r.url
-      label.value = r.label
-      url.placeholder = placeholderFor(l.kind, nk.scheme)
-      label.placeholder = nk.label
-      url.inputMode = nk.scheme === 'tel:' ? 'tel' : nk.scheme === 'mailto:' ? 'email' : 'url'
-      hintEl.textContent = r.hint
-      hintEl.hidden = !r.hint
-      kindIcon.replaceChildren(icon(G[l.kind] ? l.kind : 'arrow'))
-      changed()
-    })
-    url.addEventListener('input', () => { l.url = url.value; hintEl.hidden = true; changed() })
-    url.addEventListener('blur', () => {
-      // small kindness: a bare number on a phone link becomes tel:, a bare email becomes mailto:
-      const v = url.value.trim()
-      const sch = kindOf(l.kind).scheme
-      if (sch === 'tel:' && /^\+?[\d\s()-]{6,}$/.test(v)) url.value = l.url = 'tel:' + v.replace(/[\s()-]/g, '')
-      else if (sch === 'mailto:' && /^[^\s@:]+@[^\s@]+\.[^\s@]+$/.test(v)) url.value = l.url = 'mailto:' + v
-      else if (sch === 'https:' && /^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(v)) url.value = l.url = 'https://' + v
-      else return
-      changed()
-    })
-    label.addEventListener('input', () => { l.label = label.value; changed() })
+  const counts = countByType(D.blocks)
+  const reasons = []
+  for (const t of BLOCK_TYPES) {
+    const can = canAdd(D.blocks, t.type, st.limits)
+    btns[t.type].disabled = !can.ok
+    btns[t.type].title = can.ok ? t.hint : can.reason
+    if (!can.ok && !reasons.includes(can.reason)) reasons.push(can.reason)
+  }
+  count.textContent = `${D.blocks.length} of ${st.limits.blocks} blocks (links ${counts.link}/${st.limits.links}, videos ${counts.video}/${st.limits.videos}, socials ${counts.socials}/${st.limits.socials}).${reasons.length ? ' ' + reasons.join('. ') + '.' : ''}`
 
-    const btn = (ic, text, part, disabled, fn) =>
-      h('button', { class: 'btn btn-ghost btn-icon btn-sm', type: 'button', 'aria-label': `${text} link ${n}`, title: text, disabled, 'data-part': part, onclick: fn }, icon(ic))
-    const move = (to) => {
-      const [x] = D.links.splice(i, 1)
-      D.links.splice(to, 0, x)
-      const stay = to === 0 ? 'down' : to === D.links.length - 1 ? 'up' : to < i ? 'up' : 'down'
-      renderLinks({ id: l.id, part: stay })
-      say(`Link moved to position ${to + 1}${to === 0 ? ', now the main button' : ''}`)
-      changed()
-    }
-
-    const sid = `f${++fid}`, uid = `f${++fid}`, lid = `f${++fid}`
-    sel.id = sid; url.id = uid; label.id = lid
-    const fieldOf = (path, lab, ctl, cls) => {
-      ctl.setAttribute('aria-describedby', `${ctl.id}-err`)
-      return h('div', { class: `f${cls ? ' ' + cls : ''}`, dataset: { path } }, h('label', { for: ctl.id }, lab), ctl, h('p', { class: 'err', id: `${ctl.id}-err` }))
-    }
-    list.append(h('li', { class: `row${i === 0 ? ' main' : ''}`, dataset: { path: `links[${i}]`, id: l.id } },
-      h('div', { class: 'row-h' }, kindIcon,
-        h('span', { class: 'row-t' }, i === 0 ? h('span', { class: 'tag' }, 'Main button') : `Link ${n}`),
-        h('div', { class: 'row-acts' },
-          btn('up', 'Move up', 'up', i === 0, () => move(i - 1)),
-          btn('down', 'Move down', 'down', i === D.links.length - 1, () => move(i + 1)),
-          btn('close', 'Remove', 'remove', D.links.length === 1, () => {
-            D.links.splice(i, 1)
-            const nx = D.links[i] || D.links[i - 1]
-            renderLinks(nx ? { id: nx.id, part: 'kind' } : null)
-            say(`Link ${n} removed`)
-            changed()
-          }))),
-      h('div', { class: 'link-grid' },
-        fieldOf(`links[${i}].kind`, 'Kind', sel),
-        fieldOf(`links[${i}].url`, 'Link address', url),
-        fieldOf(`links[${i}].label`, 'Button text (optional)', label, 'wide')),
-      hintEl,
-      h('p', { class: 'err' })))
-  })
-  add.disabled = D.links.length >= MAX_LINKS
-  left.textContent = D.links.length >= MAX_LINKS ? '12 is the most a page can hold' : `${D.links.length} of ${MAX_LINKS}`
   if (focus) {
     const row = list.querySelector(`[data-id="${focus.id}"]`)
     let el = row && row.querySelector(`[data-part="${focus.part}"]`)
     if (el && el.disabled) el = row.querySelector('[data-part="up"]:not([disabled]), [data-part="down"]:not([disabled])')
-    ;(el || add).focus()
+    ;(el || btns.link).focus()
   }
   paintErrors()
+}
+
+// One labelled control with its own error slot. Path matches the validator's, so errors land on it.
+function subField(path, label, ctl, { cls, hint } = {}) {
+  ctl.id = ctl.id || `f${++fid}`
+  const hintId = hint ? `${ctl.id}-hint` : null
+  ctl.setAttribute('aria-describedby', [hintId, `${ctl.id}-err`].filter(Boolean).join(' '))
+  return h('div', { class: `f${cls ? ' ' + cls : ''}`, dataset: { path } },
+    h('label', { for: ctl.id }, label), ctl,
+    hint ? h('p', { class: 'hint', id: hintId }, hint) : null,
+    h('p', { class: 'err', id: `${ctl.id}-err` }))
+}
+
+function counter(ctl, max) {
+  const el = h('span', { class: 'count' })
+  const paint = () => { el.textContent = `${ctl.value.length}/${max}` }
+  paint()
+  ctl.addEventListener('input', paint)
+  return el
+}
+
+function blockCard(b, i, isMain) {
+  const { D } = E
+  const n = i + 1
+  const meta = BLOCK_TYPES.find((t) => t.type === b.type)
+  const lc = meta.label.toLowerCase()
+  const btn = (ic, text, part, disabled, fn) =>
+    h('button', { class: 'btn btn-ghost btn-icon btn-sm', type: 'button', 'aria-label': `${text} ${lc} block ${n}`, title: text, disabled, 'data-part': part, onclick: fn }, icon(ic))
+  const move = (dir) => {
+    D.blocks = moveBlock(D.blocks, i, dir)
+    const to = i + dir
+    const stay = to === 0 ? 'down' : to === D.blocks.length - 1 ? 'up' : dir < 0 ? 'up' : 'down'
+    renderBlocks({ id: b.id, part: stay })
+    say(`${meta.label} moved to position ${to + 1} of ${D.blocks.length}`)
+    changed()
+  }
+  const kindIcon = h('span', { class: 'row-ic' }, icon(b.type === 'link' && G[b.kind] ? b.kind : BLOCK_ICON[b.type]))
+  const body = b.type === 'link' ? linkBody(b, i, kindIcon)
+    : b.type === 'socials' ? socialsBody(b, i)
+    : b.type === 'video' ? videoBody(b, i)
+    : textBody(b, i)
+  return h('li', { class: `row block block-${b.type}${isMain ? ' main' : ''}`, dataset: { path: `blocks[${i}]`, id: b.id, type: b.type } },
+    h('div', { class: 'row-h' }, kindIcon,
+      h('span', { class: 'row-t' }, isMain ? h('span', { class: 'tag' }, 'Main button') : `${meta.label} ${n}`),
+      h('div', { class: 'row-acts' },
+        btn('up', 'Move up', 'up', i === 0, () => move(-1)),
+        btn('down', 'Move down', 'down', i === D.blocks.length - 1, () => move(1)),
+        btn('close', 'Remove', 'remove', D.blocks.length === 1, () => {
+          D.blocks = removeBlock(D.blocks, i)
+          const nx = D.blocks[i] || D.blocks[i - 1]
+          renderBlocks(nx ? { id: nx.id, part: 'remove' } : null)
+          say(`${meta.label} ${n} removed`)
+          changed()
+        }))),
+    body,
+    h('p', { class: 'err' }))
+}
+
+function linkBody(b, i, kindIcon) {
+  const { st } = E
+  const kinds = st.kinds
+  const kindOf = (id) => kinds.find((k) => k.id === id) || { id, label: id, scheme: 'https:' }
+  const k = kindOf(b.kind)
+  const sel = h('select', { class: 'in', 'data-part': 'kind' },
+    kinds.map((x) => h('option', { value: x.id }, kindLabel(x))),
+    kinds.some((x) => x.id === b.kind) ? null : h('option', { value: b.kind }, `${b.kind} (unknown)`))
+  sel.value = b.kind
+  const url = input({ value: b.url, placeholder: placeholderFor(b.kind, k.scheme), inputmode: schemeInput(k.scheme), 'data-part': 'url' })
+  const label = input({ value: b.label, maxlength: st.limits.label, placeholder: k.label || 'Button text', spellcheck: 'true', 'data-part': 'label' })
+  const hintEl = h('p', { class: 'hint link-hint', hidden: true, role: 'status' })
+  const schemeHint = h('span', { class: 'scheme-hint' })
+  const labelField = subField(`blocks[${i}].label`, '', label, { cls: 'wide' })
+  const labelLbl = labelField.querySelector('label')
+  const paintKind = (kind) => {
+    const nk = kindOf(kind)
+    url.placeholder = placeholderFor(kind, nk.scheme)
+    label.placeholder = nk.label || 'Button text'
+    url.inputMode = schemeInput(nk.scheme)
+    schemeHint.textContent = `Starts with ${nk.scheme === 'https:' ? 'https://' : nk.scheme}. Example: ${placeholderFor(kind, nk.scheme)}`
+    labelLbl.textContent = kind === 'custom' ? 'Button text (required)' : 'Button text (optional)'
+    kindIcon.replaceChildren(icon(G[kind] ? kind : 'arrow'))
+  }
+  paintKind(b.kind)
+  sel.addEventListener('change', () => {
+    const r = switchKind(b, sel.value, kinds)
+    b.kind = r.kind; b.label = r.label; b.url = r.url
+    url.value = r.url
+    label.value = r.label
+    paintKind(b.kind)
+    const msg = r.hint || (r.needsLabel ? 'A custom link needs button text.' : '')
+    hintEl.textContent = msg
+    hintEl.hidden = !msg
+    changed()
+  })
+  url.addEventListener('input', () => { b.url = url.value; hintEl.hidden = true; changed() })
+  url.addEventListener('blur', () => {
+    // small kindness: a bare number on a phone link becomes tel:, a bare email becomes mailto:, a bare domain https://
+    const fixed = switchKind({ kind: b.kind, label: '', url: url.value }, b.kind, kinds).url
+    if (fixed !== url.value) { url.value = b.url = fixed; changed() }
+  })
+  label.addEventListener('input', () => { b.label = label.value; changed() })
+  return h('div', { class: 'link-grid' },
+    subField(`blocks[${i}].kind`, 'Kind', sel),
+    subField(`blocks[${i}].url`, 'Link address', url, { hint: schemeHint }),
+    labelField,
+    hintEl)
+}
+
+function textBody(b, i) {
+  const { st } = E
+  const isHeading = b.type === 'heading'
+  const ctl = isHeading
+    ? input({ value: b.text, maxlength: st.limits.heading, placeholder: 'Our menu', spellcheck: 'true', 'data-part': 'text' })
+    : h('textarea', { class: 'in', rows: 4, maxlength: st.limits.text, placeholder: 'A few lines about the shop. Plain text only.', spellcheck: 'true', 'data-part': 'text' })
+  if (!isHeading) ctl.value = b.text
+  ctl.addEventListener('input', () => { b.text = ctl.value; changed() })
+  const f = subField(`blocks[${i}].text`, isHeading ? 'Heading' : 'Text', ctl, { hint: isHeading ? 'One short line.' : 'Plain text, up to 4 line breaks.' })
+  f.querySelector('label').append(' ', counter(ctl, isHeading ? st.limits.heading : st.limits.text))
+  return f
+}
+
+function videoBody(b, i) {
+  const url = input({ value: b.url, placeholder: 'https://youtu.be/...', inputmode: 'url', 'data-part': 'url' })
+  url.addEventListener('input', () => { b.url = url.value; changed() })
+  return subField(`blocks[${i}].url`, 'Video link', url, { hint: 'A YouTube or TikTok video. For TikTok open the video and copy the full address; short vm.tiktok.com links are refused.' })
+}
+
+function socialsBody(b, i) {
+  const { st } = E
+  const sk = socialKinds(st.kinds)
+  const kindOf = (id) => st.kinds.find((k) => k.id === id) || { id, label: id, scheme: 'https:' }
+  const items = h('ul', { class: 'social-items', 'aria-label': `Icons in socials block ${i + 1}` })
+  const addBtn = h('button', { class: 'btn btn-sm', type: 'button', 'data-part': 'add-icon' }, icon('plus'), 'Add icon')
+  const left = h('span', { class: 'hint' })
+  const paint = (focusPart) => {
+    items.replaceChildren()
+    b.items.forEach((it, j) => {
+      const sel = h('select', { class: 'in', 'data-part': `kind-${j}` },
+        sk.map((x) => h('option', { value: x.id }, x.label)),
+        sk.some((x) => x.id === it.kind) ? null : h('option', { value: it.kind }, `${it.kind} (not an icon kind)`))
+      sel.value = it.kind
+      const url = input({ value: it.url, placeholder: placeholderFor(it.kind, kindOf(it.kind).scheme), inputmode: schemeInput(kindOf(it.kind).scheme), 'data-part': `url-${j}` })
+      sel.addEventListener('change', () => {
+        const r = switchKind({ kind: it.kind, label: '', url: it.url }, sel.value, st.kinds)
+        it.kind = r.kind; it.url = r.url
+        url.value = r.url
+        url.placeholder = placeholderFor(it.kind, kindOf(it.kind).scheme)
+        changed()
+      })
+      url.addEventListener('input', () => { it.url = url.value; changed() })
+      url.addEventListener('blur', () => {
+        const fixed = switchKind({ kind: it.kind, label: '', url: url.value }, it.kind, st.kinds).url
+        if (fixed !== url.value) { url.value = it.url = fixed; changed() }
+      })
+      const rm = h('button', {
+        class: 'btn btn-ghost btn-icon btn-sm', type: 'button', 'data-part': `remove-${j}`, disabled: b.items.length === 1,
+        'aria-label': `Remove icon ${j + 1} from socials block ${i + 1}`, title: 'Remove icon',
+        onclick: () => { b.items = removeSocialItem(b.items, j); paint(`remove-${Math.min(j, b.items.length - 1)}`); say(`Icon ${j + 1} removed`); changed() },
+      }, icon('close'))
+      items.append(h('li', { class: 'social-item', dataset: { path: `blocks[${i}].items[${j}]` } },
+        subField(`blocks[${i}].items[${j}].kind`, 'Icon', sel),
+        subField(`blocks[${i}].items[${j}].url`, 'Address', url),
+        rm, h('p', { class: 'err' })))
+    })
+    addBtn.disabled = b.items.length >= st.limits.socialItems
+    left.textContent = `${b.items.length} of ${st.limits.socialItems} icons`
+    if (focusPart) items.querySelector(`[data-part="${focusPart}"]`)?.focus()
+    if (E.els.form) paintErrors()
+  }
+  addBtn.addEventListener('click', () => {
+    const r = addSocialItem(b.items, { limits: st.limits, kinds: st.kinds })
+    if (!r.ok) { say(r.reason); return }
+    b.items = r.items
+    paint(`url-${b.items.length - 1}`)
+    changed()
+  })
+  paint()
+  return h('div', { class: 'socials-body' }, items, h('div', { class: 'adds' }, addBtn, left))
 }
 
 /* ----- 08 branches */
@@ -1041,7 +1239,9 @@ function creditField() {
 
 /* ---------------------------------------------------------------- preview (press bed) */
 function pressBed() {
-  const mk = () => h('iframe', { title: 'Preview of the tap page', sandbox: 'allow-same-origin', tabindex: '-1', loading: 'eager' })
+  // allow-scripts is only so the YouTube/TikTok iframes inside the proof can run (sandbox flags are inherited by nested frames).
+  // The proof itself never contains a <script> (renderPage guarantees it), and links are blocked from navigating.
+  const mk = () => h('iframe', { title: 'Preview of the tap page', sandbox: 'allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-presentation', tabindex: '-1', loading: 'eager' })
   E.frames = [mk(), mk()]
   E.front = 0
   E.els.empty = h('div', { class: 'screen-empty' },
@@ -1057,6 +1257,7 @@ function pressBed() {
       h('div', { class: 'phone' }, h('div', { class: 'screen' }, E.els.empty, ...E.frames))))
 }
 
+// DATA: debounced preview call. Answers can arrive out of order; only the newest counts.
 async function runPreview() {
   if (!E) return
   const ed = E
@@ -1078,6 +1279,7 @@ async function runPreview() {
   }
   if (!slugOk && !errors.some((e) => e.startsWith('slug'))) errors.unshift(`slug: ${slugProblem(data.slug)}`)
   ed.errors = errors
+  if (r.data && Array.isArray(r.data.warnings)) ed.warnings = r.data.warnings
   paintErrors()
   if (!latest) return
   const p = ed.els.pulse
@@ -1092,8 +1294,11 @@ function showHtml(html) {
   const back = E.frames[1 - E.front]
   let y = 0
   try { y = front.contentWindow.scrollY || 0 } catch {}
-  back.onload = () => {
-    if (!E) return
+  // swap when the new page has loaded; a slow video iframe must not hold the proof back, so also swap after 1.2 s
+  let swapped = false
+  const swap = () => {
+    if (swapped || !E) return
+    swapped = true
     try {
       const doc = back.contentDocument
       // the preview is a picture of the page: links must not navigate the frame away
@@ -1104,17 +1309,25 @@ function showHtml(html) {
     front.classList.remove('on')
     E.front = E.frames.indexOf(back)
   }
+  back.onload = swap
+  setTimeout(swap, 1200)
   back.srcdoc = html
 }
 
-/* ---------------------------------------------------------------- errors */
+/* ---------------------------------------------------------------- errors + warnings */
+// Finds the field a path belongs to, walking up: blocks[2].items[1].url -> blocks[2].items[1] -> blocks[2] -> blocks.
 function findField(path) {
   const form = E.els.form
   const q = (p) => form.querySelector(`[data-path="${CSS.escape(p)}"]`)
-  let el = q(path)
-  if (!el) { const m = path.match(/^(.+)\.[\w$]+$/); if (m) el = q(m[1]) }
-  if (!el) { const m = path.match(/^(\w+)\[\d+\]/); if (m) el = q(m[1]) }
-  return el
+  let p = path
+  while (p) {
+    const el = q(p)
+    if (el) return el
+    const next = p.replace(/(\[\d+\]|\.[\w$]+)$/, '')
+    if (next === p) break
+    p = next
+  }
+  return null
 }
 
 function paintErrors() {
@@ -1125,6 +1338,8 @@ function paintErrors() {
     const er = el.querySelector(':scope > .err'); if (er) er.replaceChildren()
     for (const c of el.querySelectorAll(':scope > [aria-invalid], :scope > .addr > [aria-invalid]')) c.removeAttribute('aria-invalid')
   }
+  for (const el of form.querySelectorAll('.warn-note')) el.remove()
+  for (const el of form.querySelectorAll('[data-warn]')) el.removeAttribute('data-warn')
   const placed = new Map()
   const parsed = E.errors.map((e) => ({ raw: e, ...parseError(e) }))
   for (const p of parsed) {
@@ -1141,6 +1356,27 @@ function paintErrors() {
     if (er) er.replaceChildren(icon('warn'), h('span', null, msgs.join(' ')))
     const ctl = el.querySelector(':scope > .in, :scope > .addr > .in, :scope > select')
     if (ctl) ctl.setAttribute('aria-invalid', 'true')
+  }
+
+  // warnings: beside the field they are about, plus one list at the top. They never block Save or Publish.
+  const warns = (E.warnings || []).map((w) => ({ raw: w, ...parseError(w) }))
+  for (const w of warns) {
+    const el = findField(w.path)
+    w.el = el
+    if (!el) continue
+    el.setAttribute('data-warn', '')
+    el.append(h('p', { class: 'warn-note', role: 'note' }, icon('warn'), h('span', null, humanMsg(w.path, w.msg))))
+  }
+  const ws = E.els.warnSummary
+  if (ws) {
+    if (warns.length) {
+      ws.hidden = false
+      ws.replaceChildren(
+        h('h2', null, icon('warn'), warns.length === 1 ? 'One thing to look at (you can still save and publish)' : `${warns.length} things to look at (you can still save and publish)`),
+        h('ul', null, warns.map((w) => h('li', null,
+          w.el ? h('button', { type: 'button', onclick: () => focusField(w.el) }, pathName(w.path)) : pathName(w.path),
+          `: ${humanMsg(w.path, w.msg)}`))))
+    } else { ws.hidden = true; ws.replaceChildren() }
   }
 
   // summary at the top of the form: after a save attempt, or once an edit broke a page that had rendered
@@ -1172,6 +1408,7 @@ function focusField(el) {
 }
 
 /* ---------------------------------------------------------------- save */
+// DATA: PUT the page. New pages send create:true; the server answers 409 for a taken address or an old (redirected) one.
 async function save() {
   if (!E || E.saving) return
   const ed = E
@@ -1191,16 +1428,18 @@ async function save() {
   if (ed !== E) return
   ed.saving = false
   for (const b of ed.els.save) b.disabled = false
+  if (r.data && Array.isArray(r.data.warnings)) ed.warnings = r.data.warnings
   if (r.status === 200) {
     ed.initial = JSON.stringify(data)
-    S.flash = { title: `Saved ${data.name || data.slug}.`, text: 'It goes on the cards when you publish.' }
+    const w = ed.warnings.length
+    S.flash = { title: `Saved ${data.name || data.slug}.`, text: `It goes on the cards when you publish.${w ? ` ${plural(w, 'warning')}: ${say1(ed.warnings[0]).replace(/\.$/, '')}${w > 1 ? ' and more' : ''}.` : ''}` }
     guard = null
     location.hash = '#/'
     return
   }
   ed.els.state.textContent = 'Not saved'
   if (r.status === 422 && r.data && Array.isArray(r.data.errors)) ed.errors = r.data.errors
-  else if (r.status === 409) ed.errors = [`slug: "${data.slug}" is already taken by another page. Pick another address.`]
+  else if (r.status === 409) ed.errors = [`slug: ${r.data && r.data.error ? r.data.error : `"${data.slug}" is already taken by another page. Pick another address.`}`]
   else if (r.status === 404) ed.errors = ['slug: this page no longer exists on disk. Go back and reopen it.']
   else if (r.status === 400) ed.errors = ['slug: the server refused this address.']
   else ed.errors = [r.offline ? 'The studio server is not running, nothing was saved.' : `Save failed (server answered ${r.status}).`]

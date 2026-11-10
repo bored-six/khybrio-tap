@@ -37,3 +37,20 @@ test('a url that already fits gets no hint; empty url gets none', () => {
   assert.equal(sw({ kind: 'website', label: '', url: '' }, 'phone').hint, '')
   assert.equal(sw({ kind: 'phone', label: '', url: 'tel:+63912' }, 'website').hint, 'This link needs an address starting with https://')
 })
+
+test('viber: bare number converts, wrong scheme gets the viber hint', () => {
+  const K = [...KINDS, { id: 'viber', label: 'Message on Viber', scheme: 'viber:' }, { id: 'custom', label: '', scheme: 'https:' }]
+  const sw2 = (link, to) => switchKind(link, to, K)
+  assert.equal(sw2({ kind: 'website', label: '', url: '+63 912 345 6789' }, 'viber').url, 'viber://chat?number=%2B639123456789')
+  assert.match(sw2({ kind: 'website', label: '', url: 'https://example.com' }, 'viber').hint, /viber:\/\/chat\?number=%2B639XXXXXXXXX/)
+  assert.equal(sw2({ kind: 'website', label: '', url: 'viber://chat?number=%2B63912' }, 'viber').hint, '')
+})
+
+test('custom: label empties (no default) unless typed, and the result says a label is needed', () => {
+  const K = [...KINDS, { id: 'custom', label: '', scheme: 'https:' }]
+  const r = switchKind({ kind: 'website', label: 'Visit our website', url: '' }, 'custom', K)
+  assert.equal(r.label, '')
+  assert.equal(r.needsLabel, true)
+  assert.equal(switchKind({ kind: 'website', label: 'Our shop', url: '' }, 'custom', K).label, 'Our shop')
+  assert.equal(switchKind({ kind: 'website', label: '', url: '' }, 'facebook', K).needsLabel, false)
+})
