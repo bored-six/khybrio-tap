@@ -39,3 +39,17 @@ Khybrio site stays in `bored-six/Khybrio` (old cards point there).
 - The main site's `khybrio-mark.svg` / `-clean.svg` / `khybrio-glyph.svg` were the OLD K-burst mark and
   were still named as "the logo" in its ASSETS.md. The current mark is `khybrio-mark.png` (swirl on teal tile)
   and `khybrio-glyph.png` (cream, no tile). Never copy brand files by hand: `npm run sync-brand`.
+
+## 2026-11-10 - Studio preview security
+- The preview is a srcdoc iframe with `allow-scripts allow-same-origin` (YouTube embeds need both), so it runs
+  on the studio origin next to the write/publish API. It is safe only because `withPreviewCsp` injects
+  `script-src 'none'` as the first `<head>` child. Any new path that sets the preview's srcdoc/src must go through it.
+- The studio answers only Host `localhost:{port}` / `127.0.0.1:{port}` (DNS rebinding sends no Origin).
+
+## 2026-11-10 - Brand contrast
+- Khybrio coral `#e8622d` on teal-deep `#1c4d4a` is 2.81:1 accent/bg, so the v2 check warns on the Khybrio page.
+  It is a warning, not a block. The `khybrio` starter palette uses a cream bg instead (3.14:1).
+
+## 2026-11-10 - Parallel agents
+- Agents share one git index: a `git commit` takes whatever anyone has staged. Stage only your files and check
+  `git show --stat HEAD` after committing.
