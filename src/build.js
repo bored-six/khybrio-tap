@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { validateClient, validateSite } from './validate.js'
 import { renderPage, render404 } from './render.js'
 import { esc } from './html.js'
+import { readRedirects, validateRedirects } from './redirects.js'
 import { svgProblem } from './assets.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -38,6 +39,7 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
   const folders = await listClientFolders(clientsDir)
 
   const clients = []
+  const warnings = {}
   for (const folder of folders) {
     const dir = join(clientsDir, folder)
     let raw
@@ -48,7 +50,13 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
       continue
     }
     const files = (await readdir(dir, { withFileTypes: true })).filter((d) => d.isFile() && d.name !== 'client.js').map((d) => d.name)
-    const res = validateClient(raw, { folder, looks: Object.keys(looks), fonts: Object.keys(fonts), files })
+    const res = validateClient(raw, {
+      folder,
+      looks: Object.keys(looks),
+      fonts: Object.keys(fonts),
+      bodyFonts: Object.keys(fonts).filter((id) => fonts[id].body),
+      files,
+    })
     const errors = res.ok ? [] : [...res.errors]
     for (const key of ['logo', 'cover']) {
       const f = raw && raw[key]
@@ -58,9 +66,20 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
         if (problem) errors.push(`${key}: ${problem}`)
       }
     }
-    if (errors.length === 0 && res.ok) clients.push({ folder, dir, client: res.client })
+    if (errors.length === 0 && res.ok) {
+      clients.push({ folder, dir, client: res.client })
+      if (res.warnings?.length) warnings[res.client.slug] = res.warnings
+    }
     else problems.push(`${folder}:\n${errors.map((e) => `  - ${e}`).join('\n')}`)
   }
+  let redirects = {}
+  try {
+    redirects = await readRedirects(clientsDir)
+  } catch (e) {
+    problems.push(`redirects: _redirects.json could not be read: ${e.message}`)
+  }
+  const redirectErrors = validateRedirects(redirects, clients.map((c) => c.client.slug))
+  if (redirectErrors.length) problems.push(redirectErrors.map((e) => `  - ${e}`).join('\n'))
   if (problems.length) throw new Error(`Build refused. Fix these first:\n\n${problems.join('\n\n')}`)
 
   const tmpDir = `${outDir}.tmp-${process.pid}`
@@ -74,7 +93,7 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
       await mkdir(pageDir, { recursive: true })
       await writeFile(join(pageDir, 'index.html'), renderPage(client, site, { looks, fonts, icon }))
       for (const f of [client.logo, client.cover]) if (f) await copyFile(join(dir, f), join(pageDir, f))
-      for (const id of new Set([client.font.display, client.font.body])) {
+      for (const id of new Set([client.font.heading, client.font.tagline, client.font.body])) {
         for (const ff of fonts[id].files) fontFiles.set(ff.file, ff.path)
       }
     }
@@ -84,7 +103,11 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
     }
 
     await writeFile(join(tmpDir, '404.html'), render404(site, { fonts }))
-    await writeFile(join(tmpDir, '.nojekyll'), '')
+    const rkeys = Object.keys(redirects)
+    if (rkeys.length) {
+      await mkdir(join(tmpDir, '_redirect'), { recursive: true })
+      for (const old of rkeys) await writeFile(join(tmpDir, '_redirect', old), redirects[old])
+    }
     const m = esc(site.mainSite)
     await writeFile(
       join(tmpDir, 'index.html'),
@@ -97,15 +120,16 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
     throw e
   }
 
-  return { pages: clients.map((c) => c.client.slug).sort() }
+  return { pages: clients.map((c) => c.client.slug).sort(), warnings }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = resolve(here, '..')
   try {
     const site = (await import(pathToFileURL(join(root, 'site.config.js')).href)).default
-    const { pages } = await build({ root, outDir: join(root, 'dist'), site })
+    const { pages, warnings } = await build({ root, outDir: join(root, 'dist'), site })
     console.log(pages.join('\n'))
+    for (const [slug, list] of Object.entries(warnings)) for (const w of list) console.warn(`warning ${slug}: ${w}`)
   } catch (e) {
     console.error(e.message)
     process.exit(1)
