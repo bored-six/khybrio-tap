@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, extname } from 'node:path'
 import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 
 const IMG = { '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif' }
 
@@ -9,7 +10,15 @@ export function metaFor(key) {
   if (key.startsWith('_redirect/')) return { contentType: 'text/plain', cacheControl: 'no-store' }
   if (ext === '.html') return { contentType: 'text/html; charset=utf-8', cacheControl: 'no-cache' }
   if (ext === '.woff2') return { contentType: 'font/woff2', cacheControl: 'public, max-age=604800' }
+  if (ext === '.mp4') return { contentType: 'video/mp4', cacheControl: 'public, max-age=31536000, immutable' }
   return { contentType: IMG[ext] || 'application/octet-stream', cacheControl: 'public, max-age=300' }
+}
+
+function md5File(path) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('md5')
+    createReadStream(path).on('error', reject).on('data', (c) => hash.update(c)).on('end', () => resolve(hash.digest('hex')))
+  })
 }
 
 async function walk(dir, prefix = '', out = []) {
@@ -36,13 +45,8 @@ export async function syncDir({ dir, store, concurrency = 6, force = false }) {
   const builtPages = keys.filter(isPage)
   if (builtPages.length === 0) throw new Error('Refusing to publish: the build has no pages.')
 
-  const bodies = new Map()
   const local = new Map()
-  for (const k of keys) {
-    const buf = await readFile(join(dir, k))
-    bodies.set(k, buf)
-    local.set(k, createHash('md5').update(buf).digest('hex'))
-  }
+  await pool(keys, concurrency, async (k) => local.set(k, await md5File(join(dir, k))))
   const live = await store.list()
 
   const todo = keys.filter((k) => live.get(k) !== local.get(k))
@@ -62,7 +66,7 @@ export async function syncDir({ dir, store, concurrency = 6, force = false }) {
   }
 
   const group = (k) => (k.startsWith('_redirect/') ? 1 : k.endsWith('.html') ? 2 : 0)
-  const put = (k) => store.put(k, bodies.get(k), metaFor(k))
+  const put = async (k) => store.put(k, await readFile(join(dir, k)), metaFor(k))
   for (const g of [0, 1, 2]) await pool(todo.filter((k) => group(k) === g), concurrency, put)
   await pool(gone, concurrency, (k) => store.del(k))
 
