@@ -5,7 +5,7 @@ import { validateClient, validateSite } from './validate.js'
 import { renderPage, render404 } from './render.js'
 import { esc } from './html.js'
 import { readRedirects, validateRedirects } from './redirects.js'
-import { svgProblem } from './assets.js'
+import { svgProblem, inspectMp4, MEDIA } from './assets.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -20,7 +20,9 @@ export async function listClientFolders(clientsDir) {
   return keep.sort()
 }
 
-export async function build({ root, outDir, site, looks, fonts } = {}) {
+// allowMissingVideos: mp4s are git-ignored (R2 holds them), so CI has none. When set (or env
+// KHYBRIO_ALLOW_MISSING_MP4=1) a referenced-but-absent .mp4 is a warning and is not copied, never an error.
+export async function build({ root, outDir, site, looks, fonts, allowMissingVideos = process.env.KHYBRIO_ALLOW_MISSING_MP4 === '1' } = {}) {
   let icon
   if (!looks) looks = (await import('./looks/index.js')).looks
   if (!fonts) fonts = (await import('./fonts.js')).fonts
@@ -50,6 +52,12 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
       continue
     }
     const files = (await readdir(dir, { withFileTypes: true })).filter((d) => d.isFile() && d.name !== 'client.js').map((d) => d.name)
+    const missingMp4 = new Set()
+    const rbg = raw && raw.background
+    if (allowMissingVideos && rbg && rbg.type === 'video' && typeof rbg.file === 'string' && /^[^/\\]+\.mp4$/i.test(rbg.file) && !files.includes(rbg.file)) {
+      missingMp4.add(rbg.file)
+      files.push(rbg.file)
+    }
     const res = validateClient(raw, {
       folder,
       looks: Object.keys(looks),
@@ -66,9 +74,23 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
         if (problem) errors.push(`${key}: ${problem}`)
       }
     }
+    const extraWarnings = []
+    const bg = res.ok ? res.client.background : null
+    if (bg?.type === 'video' && bg.file) {
+      if (missingMp4.has(bg.file)) extraWarnings.push(`background.file: ${bg.file} is not in this checkout (mp4s are not in git); not copied`)
+      else {
+        const buf = await readFile(join(dir, bg.file))
+        if (buf.length > MEDIA.videoMax) errors.push(`background.file: File is over ${MEDIA.videoMax / 1024 / 1024} MB`)
+        else {
+          const info = inspectMp4(buf)
+          if (!info.ok) errors.push(`background.file: ${info.error}`)
+        }
+      }
+    }
     if (errors.length === 0 && res.ok) {
-      clients.push({ folder, dir, client: res.client })
-      if (res.warnings?.length) warnings[res.client.slug] = res.warnings
+      clients.push({ folder, dir, client: res.client, skip: missingMp4 })
+      const all = [...(res.warnings || []), ...extraWarnings]
+      if (all.length) warnings[res.client.slug] = all
     }
     else problems.push(`${folder}:\n${errors.map((e) => `  - ${e}`).join('\n')}`)
   }
@@ -88,11 +110,12 @@ export async function build({ root, outDir, site, looks, fonts } = {}) {
     await mkdir(tmpDir, { recursive: true })
 
     const fontFiles = new Map()
-    for (const { dir, client } of clients) {
+    for (const { dir, client, skip } of clients) {
       const pageDir = join(tmpDir, client.slug)
       await mkdir(pageDir, { recursive: true })
       await writeFile(join(pageDir, 'index.html'), renderPage(client, site, { looks, fonts, icon }))
-      for (const f of [client.logo, client.cover]) if (f) await copyFile(join(dir, f), join(pageDir, f))
+      const bgFiles = client.background?.type === 'image' ? [client.background.file] : client.background?.type === 'video' ? [client.background.file, client.background.poster] : []
+      for (const f of new Set([client.logo, client.cover, ...bgFiles])) if (f && !skip.has(f)) await copyFile(join(dir, f), join(pageDir, f))
       for (const id of new Set([client.font.heading, client.font.tagline, client.font.body])) {
         for (const ff of fonts[id].files) fontFiles.set(ff.file, ff.path)
       }
