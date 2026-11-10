@@ -99,3 +99,13 @@ test('the real clients/ folder builds', async () => {
     await rm(out, { recursive: true, force: true })
   }
 })
+
+test('card look draws the cover image when one is set, and not otherwise', () => {
+  const base = { slug: 'x-cafe', name: 'X Cafe', look: 'card', theme: { bg: '#1c4d4a', ink: '#f5f7f6', accent: '#e8622d' }, links: [{ kind: 'website', url: 'https://example.com' }] }
+  const withCover = validateClient({ ...base, cover: 'cover.jpg' }, { folder: 'x-cafe', looks: Object.keys(looks), fonts: Object.keys(fonts), files: ['cover.jpg'] })
+  assert.ok(withCover.ok, JSON.stringify(withCover.errors))
+  const html = renderPage(withCover.client, SITE, { looks, fonts, icon })
+  assert.match(html, /<img[^>]+src="[^"]*x-cafe\/cover\.jpg"/)
+  const none = validateClient(base, { folder: 'x-cafe', looks: Object.keys(looks), fonts: Object.keys(fonts), files: [] })
+  assert.ok(!/cover\.jpg/.test(renderPage(none.client, SITE, { looks, fonts, icon })))
+})

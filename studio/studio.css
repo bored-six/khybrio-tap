@@ -365,3 +365,4 @@ select.in {
 .qr-note { margin: 0 0 16px; font-size: 13px; color: var(--muted); }
 .qr-acts { display: flex; flex-direction: column; gap: 8px; }
 .qr-acts .btn { justify-content: center; min-height: 44px; }
+.link-hint { margin: 8px 0 0; color: var(--coral-ink, #b4410f); font-weight: 600; }

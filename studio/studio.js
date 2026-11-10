@@ -2,6 +2,8 @@
 // Talks to src/studio/server.js (contract: "Studio" in .claude/specs/contract.md).
 // Screens: #/ (home), #/new, #/edit/<slug>.
 
+import { switchKind } from './link-rules.js'
+
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 const RESERVED = ['assets', 'fonts', '404', 'index']
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i
@@ -896,15 +898,22 @@ function renderLinks(focus) {
     const url = input({ value: l.url, placeholder: placeholderFor(l.kind, k.scheme), inputmode: k.scheme === 'tel:' ? 'tel' : k.scheme === 'mailto:' ? 'email' : 'url', 'data-part': 'url' })
     const label = input({ value: l.label, maxlength: 40, placeholder: k.label, spellcheck: 'true', 'data-part': 'label' })
 
+    const hintEl = h('p', { class: 'hint link-hint', hidden: true, role: 'status' })
     sel.addEventListener('change', () => {
-      l.kind = sel.value
+      const r = switchKind(l, sel.value, kinds)
+      l.kind = r.kind; l.label = r.label; l.url = r.url
       const nk = kindOf(l.kind)
+      url.value = r.url
+      label.value = r.label
       url.placeholder = placeholderFor(l.kind, nk.scheme)
       label.placeholder = nk.label
+      url.inputMode = nk.scheme === 'tel:' ? 'tel' : nk.scheme === 'mailto:' ? 'email' : 'url'
+      hintEl.textContent = r.hint
+      hintEl.hidden = !r.hint
       kindIcon.replaceChildren(icon(G[l.kind] ? l.kind : 'arrow'))
       changed()
     })
-    url.addEventListener('input', () => { l.url = url.value; changed() })
+    url.addEventListener('input', () => { l.url = url.value; hintEl.hidden = true; changed() })
     url.addEventListener('blur', () => {
       // small kindness: a bare number on a phone link becomes tel:, a bare email becomes mailto:
       const v = url.value.trim()
@@ -951,6 +960,7 @@ function renderLinks(focus) {
         fieldOf(`links[${i}].kind`, 'Kind', sel),
         fieldOf(`links[${i}].url`, 'Link address', url),
         fieldOf(`links[${i}].label`, 'Button text (optional)', label, 'wide')),
+      hintEl,
       h('p', { class: 'err' })))
   })
   add.disabled = D.links.length >= MAX_LINKS
@@ -1072,7 +1082,7 @@ async function runPreview() {
   if (!latest) return
   const p = ed.els.pulse
   if (!errors.length) { p.className = 'pulse'; ed.els.pulseText.textContent = 'Up to date' }
-  else { p.className = 'pulse stale'; ed.els.pulseText.textContent = ed.lastHtml ? 'Showing last good version' : 'Not ready yet' }
+  else { p.className = 'pulse stale'; ed.els.pulseText.textContent = ed.lastHtml ? 'Out of date' : 'Not ready yet' }
 }
 
 function showHtml(html) {
@@ -1121,7 +1131,7 @@ function paintErrors() {
     const el = findField(p.path)
     p.el = el
     if (!el) continue
-    if (!E.attempted && !el.dataset.touched && !el.closest('[data-touched]')) continue
+    if (!E.attempted && !E.lastHtml && !el.dataset.touched && !el.closest('[data-touched]')) continue
     if (!placed.has(el)) placed.set(el, [])
     placed.get(el).push(humanMsg(p.path, p.msg) + (el.dataset.path !== p.path ? ` (${pathName(p.path)})` : ''))
   }
@@ -1133,12 +1143,12 @@ function paintErrors() {
     if (ctl) ctl.setAttribute('aria-invalid', 'true')
   }
 
-  // summary at the top of the form: after a save attempt only
+  // summary at the top of the form: after a save attempt, or once an edit broke a page that had rendered
   const sum = E.els.summary
-  if (E.attempted && parsed.length) {
+  if ((E.attempted || E.lastHtml) && parsed.length) {
     sum.hidden = false
     sum.replaceChildren(
-      h('h2', null, icon('warn'), parsed.length === 1 ? 'One thing to fix before saving' : `${parsed.length} things to fix before saving`),
+      h('h2', null, icon('warn'), E.attempted ? (parsed.length === 1 ? 'Not saved: one thing to fix' : `Not saved: ${parsed.length} things to fix`) : (parsed.length === 1 ? 'Preview is out of date: one thing to fix' : `Preview is out of date: ${parsed.length} things to fix`)),
       h('ul', null, parsed.map((p) => h('li', null,
         p.el ? h('button', { type: 'button', onclick: () => focusField(p.el) }, pathName(p.path)) : pathName(p.path),
         `: ${humanMsg(p.path, p.msg)}`))))
@@ -1150,7 +1160,7 @@ function paintErrors() {
   if (parsed.length) {
     pe.hidden = false
     pe.replaceChildren(
-      h('h3', null, icon('warn'), E.lastHtml ? `Last good version shown. ${parsed.length === 1 ? 'One thing' : parsed.length + ' things'} to fix:` : `Before it can show: ${parsed.length === 1 ? 'one thing' : parsed.length + ' things'}`),
+      h('h3', null, icon('warn'), E.lastHtml ? `Preview is out of date. Fix ${parsed.length === 1 ? 'this' : 'these ' + parsed.length + ' things'} below:` : `Before it can show: ${parsed.length === 1 ? 'one thing' : parsed.length + ' things'}`),
       h('ul', null, parsed.map((p) => h('li', null, h('span', null, `${pathName(p.path)}: `), humanMsg(p.path, p.msg)))))
   } else { pe.hidden = true; pe.replaceChildren() }
 }

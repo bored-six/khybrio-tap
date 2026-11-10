@@ -12,6 +12,11 @@ function render(ctx) {
     ? `<img class="lg" src="${esc(ctx.asset(c.logo))}" alt="" width="88" height="88">`
     : `<span class="lg mono" aria-hidden="true">${esc([...c.name][0])}</span>`
 
+  // cover: a banner bleeding to the card edges above the name; the tap ripple moves aside for it
+  const cover = c.cover
+    ? `<div class="cv"><img src="${esc(ctx.asset(c.cover))}" alt="" width="800" height="600"></div>`
+    : ''
+
   const row = (l, i) => {
     const d = detail(l)
     return (
@@ -38,7 +43,8 @@ function render(ctx) {
 
   const cr = credit(ctx, 'cr')
   return (
-    `<main class="cd">` +
+    `<main class="cd${cover ? ' hc' : ''}">` +
+    cover +
     `<header class="hd">${mark}<h1 class="nm ${nameSize(c.name)}">${esc(c.name)}</h1>` +
     (c.tagline ? `<p class="tg">${esc(c.tagline)}</p>` : '') +
     `</header>` +
@@ -62,6 +68,9 @@ const css = () =>
   `animation:tap 1.6s cubic-bezier(.16,1,.3,1) both}` +
   `@keyframes tap{from{transform:scale(.45);opacity:.3}}` +
   `.hd{position:relative;padding-top:40px}` +
+  `.cv{margin:0 -20px;aspect-ratio:4/3;max-height:240px;overflow:hidden;background:var(--line)}` +
+  `.cv img{display:block;width:100%;height:100%;object-fit:cover}` +
+  `.hc::before{display:none}.hc .hd{padding-top:24px}` +
   `.lg{width:88px;height:88px;border-radius:24px;object-fit:contain}` +
   `.mono{display:grid;place-items:center;border:1.75px solid var(--ink);border-radius:50%;font:600 2.6rem/1 var(--font-display)}` +
   `.nm{margin-top:24px;font-family:var(--font-display);font-weight:600;letter-spacing:-.022em;overflow-wrap:anywhere;text-wrap:balance}` +
@@ -91,6 +100,7 @@ const css = () =>
   `.cr strong{margin-left:.3em;font-family:var(--font-display);font-weight:600;font-size:1rem}` +
   // desktop: the column is the card, lifted off a darker table
   `@media (min-width:600px){html{background:color-mix(in srgb,var(--bg) 78%,#000)}body{background:none;padding:7vh 24px}` +
+  `.cv{margin:0 -32px;border-radius:28px 28px 0 0}` +
   `.cd{min-height:0;border-radius:28px;background:var(--bg);padding:0 32px 36px;` +
   `box-shadow:0 0 0 1px var(--line),0 40px 80px -30px rgba(0,0,0,.55)}.cd::before{left:-184px}}`
 
