@@ -7,6 +7,7 @@ export default {
   look: 'menu-board',
   theme: { bg: '#fff4e6', ink: '#3b1f14', accent: '#e8622d' },
   font: { display: 'fraunces', body: 'inter' },
+  cover: 'cover.svg', // sample illustration, swap for a real photo (jpg/webp) per client
   links: [
     { kind: 'menu', url: 'https://example.com/menu', label: 'See the menu' },
     { kind: 'order', url: 'https://example.com/order', label: 'Order for pickup' },

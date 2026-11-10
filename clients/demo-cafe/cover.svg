@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600" role="img" aria-label="Illustration: a shake, a coffee and an ensaymada on a counter. Sample image.">
+  <!-- Sample cover for the demo page. Drawn in the icon idiom: one ink stroke, round joins.
+       The arch frame in the menu-board look crops to a semicircle of r 400 at 400,400. -->
+  <rect width="800" height="600" fill="#f7dcc2"/>
+  <circle cx="400" cy="330" r="214" fill="#f3c19c"/>
+  <g fill="none" stroke="#3b1f14" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <!-- counter -->
+    <path d="M0 474H800V600H0Z" fill="#3b1f14"/>
+    <path d="M0 474H800" stroke="#5c3424" stroke-width="10"/>
+    <!-- coffee: steam, cup, saucer -->
+    <path d="M182 326c-16-20 16-32 0-56M214 318c-16-20 16-32 0-56M246 326c-16-20 16-32 0-56"/>
+    <ellipse cx="214" cy="464" rx="96" ry="14" fill="#fff4e6"/>
+    <path d="M282 376a26 26 0 0 1 0 52"/>
+    <path d="M144 352H284V404C284 436 254 456 214 456S144 436 144 404Z" fill="#fff4e6"/>
+    <path d="M144 384H284" stroke="#e8622d" stroke-width="12" stroke-linecap="butt"/>
+    <path d="M144 352H284V404C284 436 254 456 214 456S144 436 144 404Z"/>
+    <!-- shake: straw, glass, shake, whip, cherry -->
+    <path d="M436 84L414 236" stroke-width="18"/>
+    <path d="M436 84L414 236" stroke="#fff4e6" stroke-width="8" stroke-linecap="butt"/>
+    <path d="M436 84L414 236" stroke="#e8622d" stroke-width="8" stroke-dasharray="12 12" stroke-linecap="butt"/>
+    <path d="M330 232H470L450 462Q449 470 441 470H359Q351 470 350 462Z" fill="#fff4e6"/>
+    <path d="M338 284H462L448 452H352Z" fill="#e8622d" stroke="none"/>
+    <path d="M343 330H457M347 376H453" stroke="#f3a274" stroke-width="5"/>
+    <path d="M330 232H470L450 462Q449 470 441 470H359Q351 470 350 462Z"/>
+    <path d="M326 244C306 244 306 206 334 206C334 176 374 168 388 188C398 162 446 168 444 198C472 194 484 236 462 244Z" fill="#fffaf3"/>
+    <path d="M402 172C400 150 410 136 424 128"/>
+    <circle cx="398" cy="184" r="17" fill="#c8401a"/>
+    <!-- ensaymada on a plate -->
+    <ellipse cx="600" cy="464" rx="104" ry="15" fill="#fff4e6"/>
+    <path d="M522 452C520 392 678 392 678 452Z" fill="#eda866"/>
+    <path d="M600 432c-12 0-14-16 0-18 22-2 26 24 4 28-28 6-40-30-12-40 30-10 56 16 44 38" stroke-width="5"/>
+    <g fill="#fffaf3" stroke="none">
+      <circle cx="560" cy="420" r="4"/><circle cx="640" cy="416" r="4"/><circle cx="586" cy="404" r="3.5"/>
+      <circle cx="622" cy="440" r="3.5"/><circle cx="548" cy="440" r="3.5"/><circle cx="656" cy="436" r="4"/>
+    </g>
+    <!-- the sample tag -->
+    <path d="M300 512H500V560H300Z" fill="#fff4e6" stroke="#fff4e6" stroke-width="10"/>
+  </g>
+  <text x="400" y="546" text-anchor="middle" font-family="Georgia, serif" font-size="26" letter-spacing="8" fill="#3b1f14">SAMPLE</text>
+</svg>
