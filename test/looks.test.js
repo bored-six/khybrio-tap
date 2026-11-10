@@ -168,9 +168,11 @@ for (const lookId of Object.keys(looks)) {
   })
 
   test(`look "${lookId}": credit link follows the credit flag`, () => {
-    const credit = /<a\b[^>]*href="https:\/\/khybrio\.com\/"[^>]*>[\s\S]*?Khybrio[\s\S]*?<\/a>/
+    // Contract: the credit links to site.mainSite of the site being rendered.
+    const href = `href="${SITE_PATH.mainSite}"`
+    const credit = new RegExp(`<a\\b[^>]*${href.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}[^>]*>[\\s\\S]*?Khybrio[\\s\\S]*?</a>`)
     assert.match(render(everything(lookId, true)), credit)
-    assert.doesNotMatch(render(everything(lookId, false)), /href="https:\/\/khybrio\.com\/"/)
+    assert.ok(!render(everything(lookId, false)).includes(href), 'no credit link when credit is false')
   })
 
   test(`look "${lookId}": colour only from theme vars, hex/rgb only as #000/#fff inside color-mix`, () => {
