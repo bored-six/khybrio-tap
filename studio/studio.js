@@ -8,6 +8,7 @@
 //   - PRESENTATION: everything that calls h(...) to build markup, the class names, the icons.
 
 import { switchKind, placeholderFor } from './link-rules.js'
+import { MAX_SIDE, TARGET_BYTES, targetSize, outputName, qualitySteps, shouldReencode, isHeic } from './image-prep.js'
 import {
   BLOCK_TYPES, normHex, slugProblem, renameGate, canAdd, addBlock, moveBlock, removeBlock,
   addSocialItem, removeSocialItem, socialKinds, countByType, payload, fromData, blankDraft,
@@ -564,7 +565,7 @@ function buildEditor() {
     sec('Look', 'Six layouts, drawn here in this page\'s colours. Switch any time, nothing is lost.', lookTiles()),
     sec('Colours', 'Start from a swatch, then bend it. Any colour is allowed.', colourFields()),
     sec('Type', 'Heading is the name and headings, tagline is the line under the name, body is everything else.', fontPickers()),
-    sec('Images', 'SVG, PNG, JPG or WebP, up to 3 MB. Use JPG or WebP for the cover: Facebook ignores SVG previews.', imageFields()),
+    sec('Images', 'Any photo works: it is shrunk and converted here before it uploads. SVG is kept as is. Use a photo for the cover: Facebook ignores SVG previews.', imageFields()),
     sec('Blocks', null, blockSection()),
     sec('Branches', 'Optional. Leave empty for a single shop with no address shown.', branchSection()),
     sec('Footer', null, creditField()),
@@ -1017,6 +1018,49 @@ function fontPickers() {
 }
 
 /* ----- 06 images */
+const HEIC_MSG = 'This looks like an iPhone HEIC photo. Open it in Photos and export as JPEG, or use Safari, which can read it.'
+const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
+class PrepError extends Error {}
+
+async function decodeImage(file) {
+  try {
+    return await createImageBitmap(file, { imageOrientation: 'from-image' })
+  } catch { /* fall through to <img> */ }
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    return img
+  } finally { URL.revokeObjectURL(url) }
+}
+const toBlob = (canvas, type, q) => new Promise((res) => canvas.toBlob(res, type, q))
+
+// Shrinks and re-encodes a raster photo in the browser. Resolves { blob, name }.
+async function prepareImage(file, key) {
+  let src
+  try { src = await decodeImage(file) } catch {
+    throw new PrepError(isHeic(file) ? HEIC_MSG : 'That file could not be read as a picture. Try a JPG or PNG.')
+  }
+  const sw = src.width || src.naturalWidth, sh = src.height || src.naturalHeight
+  const { width, height } = targetSize(sw, sh, MAX_SIDE[key])
+  const canvas = document.createElement('canvas')
+  canvas.width = width; canvas.height = height
+  const ctx = canvas.getContext('2d')
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(src, 0, 0, width, height)
+  if (src.close) src.close()
+  let type = 'image/webp'
+  let blob = await toBlob(canvas, type, 0.82)
+  if (!blob || blob.type !== 'image/webp') { type = 'image/jpeg'; blob = await toBlob(canvas, type, 0.82) }
+  if (!blob) throw new PrepError('This browser could not convert the photo. Try a smaller JPG.')
+  for (const q of qualitySteps().slice(1)) {
+    if (blob.size <= TARGET_BYTES) break
+    blob = await toBlob(canvas, type, q) || blob
+  }
+  return { blob, name: outputName(file.name, type === 'image/webp' ? 'webp' : 'jpg') }
+}
+
 function imageFields() {
   return h('div', { class: 'imgs' }, imageField('logo', 'Logo', 'Square works best'), imageField('cover', 'Cover', 'Wide photo, about 4:3'))
 }
@@ -1025,7 +1069,7 @@ function imageField(key, label, hint) {
   const thumb = h('div', { class: 'thumb' })
   const fileLine = h('p', { class: 'img-file' })
   const status = h('p', { class: 'hint', 'aria-live': 'polite' })
-  const fileIn = h('input', { type: 'file', accept: '.svg,.png,.jpg,.jpeg,.webp,image/svg+xml,image/png,image/jpeg,image/webp', 'aria-label': `Choose ${label.toLowerCase()} file` })
+  const fileIn = h('input', { type: 'file', accept: 'image/*,.heic,.heif', 'aria-label': `Choose ${label.toLowerCase()} file` })
   const pickLbl = h('span', null, 'Choose file')
   const pick = h('label', { class: 'btn btn-sm pick' }, icon('image'), pickLbl, fileIn)
   const remove = h('button', { class: 'btn btn-sm btn-ghost btn-danger', type: 'button' }, icon('close'), 'Remove')
@@ -1045,32 +1089,63 @@ function imageField(key, label, hint) {
   }
   paint()
 
-  fileIn.addEventListener('change', async () => {
-    const file = fileIn.files && fileIn.files[0]
-    fileIn.value = ''
-    if (!file) return
+  const upload = async (file) => {
     const local = (msg) => { status.textContent = ''; wrap.classList.add('bad'); err.replaceChildren(icon('warn'), h('span', null, msg)) }
     wrap.classList.remove('bad'); err.replaceChildren()
     const sp = slugProblem(D.slug)
     if (sp) return local('Set the page address first, the file is stored under it.')
-    const clean = file.name.toLowerCase().replace(/\s+/g, '-')
-    if (!ASSET_RE.test(clean) || clean.includes('..')) return local('Use an SVG, PNG, JPG or WebP file with a plain name.')
-    if (file.size > MAX_ASSET) return local(`That file is ${(file.size / 1048576).toFixed(1)} MB. The limit is 3 MB.`)
-    status.textContent = 'Uploading'
+    let body = file, name = file.name.toLowerCase().replace(/\s+/g, '-'), type = file.type || 'application/octet-stream'
     pick.classList.add('busy')
-    const r = await api(`/api/clients/${D.slug}/assets?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file, type: file.type || 'application/octet-stream' })
-    pick.classList.remove('busy')
-    if (!E) return
-    if (r.status === 201 && r.data && r.data.file) {
-      D[key] = r.data.file
-      E.ver[key] = Date.now()
-      E.uploaded = true
-      status.textContent = 'Uploaded'
-      setTimeout(() => { if (status.textContent === 'Uploaded') status.textContent = '' }, 1600)
-      paint(); lockSlug(); changed()
-    } else {
-      local(r.data && r.data.error ? r.data.error : r.offline ? 'The studio server is not running.' : `Upload failed (server answered ${r.status}).`)
+    try {
+      if (shouldReencode(file)) {
+        status.textContent = 'Preparing photo...'
+        try {
+          const out = await prepareImage(file, key)
+          body = out.blob; name = out.name; type = out.blob.type
+        } catch (e) {
+          pick.classList.remove('busy')
+          return local(e instanceof PrepError ? e.message : 'That file could not be prepared. Try a JPG or PNG.')
+        }
+      } else if (!ASSET_RE.test(name) || name.includes('..')) {
+        pick.classList.remove('busy')
+        return local('Choose a photo, or an SVG with a plain file name.')
+      }
+      if (body.size > MAX_ASSET) {
+        pick.classList.remove('busy')
+        return local(`That file is ${sizeText(body.size)}. The limit is 3 MB.`)
+      }
+      status.textContent = 'Uploading...'
+      const r = await api(`/api/clients/${D.slug}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', body, type })
+      pick.classList.remove('busy')
+      if (!E) return
+      if (r.status === 201 && r.data && r.data.file) {
+        D[key] = r.data.file
+        E.ver[key] = Date.now()
+        E.uploaded = true
+        status.textContent = `Uploaded, ${sizeText(body.size)}`
+        setTimeout(() => { if (status.textContent.startsWith('Uploaded')) status.textContent = '' }, 4000)
+        paint(); lockSlug(); changed()
+      } else {
+        local(r.data && r.data.error ? r.data.error : r.offline ? 'The studio server is not running.' : `Upload failed (server answered ${r.status}).`)
+      }
+    } catch (e) {
+      pick.classList.remove('busy')
+      local('Something went wrong while uploading. Try again.')
     }
+  }
+  fileIn.addEventListener('change', () => {
+    const file = fileIn.files && fileIn.files[0]
+    fileIn.value = ''
+    if (file) upload(file)
+  })
+  let depth = 0
+  wrap.addEventListener('dragenter', (e) => { if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); depth++; wrap.classList.add('drop') })
+  wrap.addEventListener('dragover', (e) => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } })
+  wrap.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) wrap.classList.remove('drop') })
+  wrap.addEventListener('drop', (e) => {
+    e.preventDefault(); depth = 0; wrap.classList.remove('drop')
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
+    if (file) upload(file)
   })
   remove.addEventListener('click', () => {
     D[key] = null

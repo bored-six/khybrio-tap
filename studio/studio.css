@@ -619,3 +619,9 @@ select.in {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .tile:hover .tile-art, .tile:has(input:checked) .tile-art, .pal:hover .pal-card, .pal[aria-pressed="true"] .pal-card, a.face:hover { transform: none; }
 }
+
+/* image drop + progress */
+.img { transition: border-color .15s var(--ease), background-color .15s var(--ease); }
+.img.drop { border-color: var(--teal); border-style: dashed; background: color-mix(in srgb, var(--teal) 8%, var(--paper)); }
+.img.drop .thumb { border-color: var(--teal); }
+.pick.busy { opacity: .6; pointer-events: none; }
