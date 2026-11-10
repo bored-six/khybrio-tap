@@ -67,11 +67,16 @@ const G = {
 // QR: three finder squares, the data corner is the dot
 G.qr = '<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.5"/><path d="M14 14h2.75v2.75M20.5 14v6.5H14"/>' + dot(17.5, 17.5)
 G.pin = G.maps
-// block-type glyphs: H, lines, three dots, play frame
+// block-type glyphs: link = a button (pill + arrow), heading = H, text = three lines, socials = three rings, video = play frame
+G.link = '<rect x="2.75" y="7" width="18.5" height="10" rx="5"/><path d="M8 12h7.5M13.25 9.75L15.5 12l-2.25 2.25"/>'
 G.heading = '<path d="M6.5 5v14M17.5 5v14M6.5 12h11"/>'
 G.text = '<path d="M4.5 7h15M4.5 12h15M4.5 17h9"/>'
-G.socials = '<path d="M6 12h.01M12 12h.01M18 12h.01"/>'
+G.socials = '<circle cx="5.25" cy="12" r="2.5"/><circle cx="12" cy="12" r="2.5"/><circle cx="18.75" cy="12" r="2.5"/>'
 G.video = '<rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M10.25 9.5v5l4.25-2.5z"/>'
+// studio chrome: chevron; a phone (the preview); a calm note (ring, bar, the dot on top)
+G.chev = '<path d="M6.5 9.5l5.5 5.5 5.5-5.5"/>'
+G.device = '<rect x="6.25" y="2.75" width="11.5" height="18.5" rx="2.5"/><path d="M10.5 17.75h3"/>'
+G.note = '<circle cx="12" cy="12" r="8.75"/><path d="M12 11.25v5"/>' + dot(12, 7.75)
 
 const svgMarkup = (name) =>
   `<svg class="ic" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.75" ` +
@@ -264,7 +269,7 @@ async function screenHome() {
   const main = h('main', { class: 'home', id: 'main' })
   main.append(h('div', { class: 'home-head' },
     h('div', null,
-      h('h1', null, 'Tap pages'),
+      h('h1', null, 'Tap ', h('em', null, 'pages')),
       h('p', null, st.clients.length
         ? `${plural(st.clients.length, 'page')}. Saving keeps a change here; publishing puts it on the cards.`
         : 'One page per client. Each NFC card opens one of these.')),
@@ -275,16 +280,19 @@ async function screenHome() {
   { const bn = backupNote(st.backup); if (bn) main.append(bn) }
 
   const rack = h('ul', { class: 'rack', 'aria-label': 'Client pages' })
-  if (!st.clients.length) {
-    rack.append(h('li', null, h('a', { class: 'empty', href: '#/new' },
-      h('div', null, h('strong', null, 'No pages yet'), 'Make the first one.'))))
-  }
   for (const c of st.clients) rack.append(clientCard(c, lookLabel, pending.has(c.slug)))
+  rack.append(h('li', null, h('a', { class: 'newcard', href: '#/new' },
+    h('span', { class: 'plus', 'aria-hidden': 'true' }, icon('plus')),
+    h('span', null, h('strong', null, st.clients.length ? 'New page' : 'No pages yet'), st.clients.length ? 'Start from a blank card.' : 'Make the first one.'))))
   main.append(rack)
 
   app.replaceChildren(topBar(), main)
 }
 
+// whichever of ink/bg reads better on the accent (tie -> ink), as validate.js does
+const onAccent = (bg, ink, ac) => (ratio(ink, ac) >= ratio(bg, ac) ? ink : bg)
+
+// A client is its tap card with its phone leaning on it: the card wears the theme, the phone shows the look.
 function clientCard(c, lookLabel, isPending) {
   const t = c.theme || {}
   const bg = normHex(t.bg), ink = normHex(t.ink), accent = normHex(t.accent)
@@ -293,24 +301,24 @@ function clientCard(c, lookLabel, isPending) {
   const href = `#/edit/${c.slug}`
   const face = h('a', {
     class: `face${themed ? '' : ' broken'}`, href,
-    style: themed ? { '--bg': bg, '--ink': ink, '--accent': accent } : null,
+    style: themed ? { '--f-bg': bg, '--f-ink': ink, '--f-accent': accent, '--t-bg': bg, '--t-ink': ink, '--t-accent': accent, '--t-on': onAccent(bg, ink, accent) } : null,
     title: themed ? `Background ${bg}, text ${ink}, accent ${accent}` : null,
     'aria-label': `Edit ${name}`,
   },
   c.logo
     ? h('img', { class: 'face-mark', src: `/p/${c.slug}/${encodeURIComponent(c.logo)}`, alt: '', loading: 'lazy' })
     : h('span', { class: 'face-mono', 'aria-hidden': 'true' }, [...name][0]?.toUpperCase() || '?'),
-  h('span', { class: 'face-tap' }, icon('tap')),
+  themed ? frag(`<svg class="face-look" viewBox="0 0 60 96" aria-hidden="true" focusable="false">${(LOOK_ART[c.look] || LOOK_ART._)(`fl-${c.slug}`)}</svg>`) : null,
   h('span', { class: 'face-name' }, name),
-  c.tagline ? h('span', { class: 'face-tag' }, c.tagline) : null,
-  h('span', { class: 'face-btn', 'aria-hidden': 'true' }))
+  c.tagline ? h('span', { class: 'face-tag' }, c.tagline) : null)
 
   const meta = h('p', { class: 'cc-meta' },
     h('span', { class: 'slug' }, c.slug),
     c.look && lookLabel[c.look] ? [h('span', { class: 'sep', 'aria-hidden': 'true' }), h('span', null, lookLabel[c.look])] : null,
-    h('span', { class: 'sep', 'aria-hidden': 'true' }), h('span', null, plural(c.blockCount ?? 0, 'block')))
+    h('span', { class: 'sep', 'aria-hidden': 'true' }), h('span', null, plural(c.blockCount ?? 0, 'block')),
+    isPending ? h('span', { class: 'pending' }, 'Not published yet') : null)
 
-  const copyBtn = h('button', { class: 'btn btn-sm', type: 'button' }, icon('copy'), h('span', null, 'Copy link'))
+  const copyBtn = h('button', { class: 'tool', type: 'button' }, icon('copy'), h('span', null, 'Copy link'))
   copyBtn.addEventListener('click', async () => {
     const ok = await copyText(c.liveUrl)
     const lbl = copyBtn.querySelector('span')
@@ -323,16 +331,15 @@ function clientCard(c, lookLabel, isPending) {
 
   return h('li', { class: 'cc' },
     face,
-    h('div', null, meta,
-      isPending ? h('p', { class: 'cc-meta', style: { 'margin-top': '4px' } }, h('span', { class: 'pending' }, 'Not published yet')) : null),
+    meta,
     c.valid === false
       ? h('p', { class: 'chip chip-warn' }, icon('warn'), h('span', null, c.errors && c.errors.length ? say1(c.errors[0]) : 'This page has a problem'))
       : null,
     h('div', { class: 'cc-acts' },
-      h('a', { class: 'btn btn-sm', href }, icon('edit'), 'Edit'),
-      h('a', { class: 'btn btn-sm', href: c.liveUrl, target: '_blank', rel: 'noopener', title: isPending ? 'Shows the last published version' : null }, icon('out'), 'Open live'),
+      h('a', { class: 'tool', href }, icon('edit'), h('span', null, 'Edit')),
+      h('a', { class: 'tool', href: c.liveUrl, target: '_blank', rel: 'noopener', title: isPending ? 'Shows the last published version' : null }, icon('out'), h('span', null, 'Open live')),
       copyBtn,
-      h('button', { class: 'btn btn-sm', type: 'button', onclick: () => openQr(c, name) }, icon('qr'), 'QR code')))
+      h('button', { class: 'tool', type: 'button', onclick: () => openQr(c, name) }, icon('qr'), h('span', null, 'QR code'))))
 }
 
 // QR for the live link: the same address the NFC chip gets. SVG for print, PNG for chat and social.
@@ -527,7 +534,7 @@ function buildEditor() {
   E.els.title = title
 
   const top = h('header', { class: 'top' },
-    h('a', { class: 'back', href: '#/' }, icon('back'), 'All pages'),
+    h('a', { class: 'back', href: '#/', 'aria-label': 'All pages' }, icon('back'), h('span', null, 'All pages')),
     title, h('span', { class: 'grow' }), stateEl, saveBtn)
 
   const form = h('form', { class: 'form', novalidate: true, id: 'main', onsubmit: (e) => { e.preventDefault(); save() } })
@@ -542,26 +549,78 @@ function buildEditor() {
   form.append(E.els.summary, E.els.warnSummary)
   if (S.flash) { form.append(flashNote(S.flash)); S.flash = null }
 
-  let n = 0
-  const sec = (title, hint, ...body) =>
-    h('fieldset', { class: 'sec' }, h('legend', null, h('span', { class: 'no' }, String(++n).padStart(2, '0')), title),
+  // PRESENTATION: every section is a sheet with a numeral; the rail jumps between them.
+  const secs = []
+  const sec = (name, hint, ...body) => {
+    const no = String(secs.length + 1).padStart(2, '0')
+    const el = h('fieldset', { class: 'sec' }, h('legend', null, h('span', { class: 'no', 'aria-hidden': 'true' }, no), name),
       hint ? h('p', { class: 'sec-hint' }, hint) : null, h('div', { class: 'sec-body' }, body))
+    secs.push({ no, name, el })
+    return el
+  }
 
   form.append(
-    sec('Address', mode === 'new' ? 'Where the card points. Filled in from the name, change it if you like.' : null, addressField()),
-    sec('Name', null, nameFields()),
-    sec('Look', null, lookTiles()),
-    sec('Colours', null, colourFields()),
+    sec('Basics', null, nameFields(), addressField()),
+    sec('Look', 'Six layouts, drawn here in this page\'s colours. Switch any time, nothing is lost.', lookTiles()),
+    sec('Colours', 'Start from a swatch, then bend it. Any colour is allowed.', colourFields()),
     sec('Type', 'Heading is the name and headings, tagline is the line under the name, body is everything else.', fontPickers()),
     sec('Images', 'SVG, PNG, JPG or WebP, up to 3 MB. Use JPG or WebP for the cover: Facebook ignores SVG previews.', imageFields()),
-    sec('Blocks', 'The page shows these top to bottom. The first link is the main button.', blockSection()),
+    sec('Blocks', null, blockSection()),
     sec('Branches', 'Optional. Leave empty for a single shop with no address shown.', branchSection()),
     sec('Footer', null, creditField()),
     h('div', { class: 'form-end' },
       h('a', { class: 'btn', href: '#/' }, 'Cancel'),
       (() => { const b = h('button', { class: 'btn btn-primary btn-big', type: 'submit' }, icon('check'), 'Save page'); E.els.save.push(b); return b })()))
 
-  app.replaceChildren(top, h('div', { class: 'ed' }, form, pressBed()))
+  const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches
+  const railIn = h('div', { class: 'rail-in' }, h('p', { class: 'rail-t', 'aria-hidden': 'true' }, 'Sections'))
+  for (const s of secs) {
+    s.btn = h('button', { class: 'rail-i', type: 'button', onclick: () => s.el.scrollIntoView({ block: 'start', behavior: calm() ? 'auto' : 'smooth' }) },
+      h('i', { 'aria-hidden': 'true' }, s.no), s.name)
+    railIn.append(s.btn)
+  }
+  const rail = h('nav', { class: 'rail', 'aria-label': 'Sections' }, railIn)
+  let spyRaf = 0
+  const spy = () => {
+    spyRaf = 0
+    let cur = secs[0]
+    for (const s of secs) if (s.el.getBoundingClientRect().top < 220) cur = s
+    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) cur = secs[secs.length - 1]
+    for (const s of secs) {
+      if (s === cur) s.btn.setAttribute('aria-current', 'true')
+      else s.btn.removeAttribute('aria-current')
+    }
+    // when the rail lies flat it scrolls sideways to keep the current chip in view
+    if (railIn.scrollWidth > railIn.clientWidth) railIn.scrollTo({ left: cur.btn.offsetLeft - railIn.offsetLeft - 16, behavior: calm() ? 'auto' : 'smooth' })
+  }
+  const onScroll = () => { if (!spyRaf) spyRaf = requestAnimationFrame(spy) }
+  window.addEventListener('scroll', onScroll, { passive: true })
+
+  // PRESENTATION: on narrow screens the stage is a drawer opened by a floating button.
+  const stage = pressBed()
+  const fab = h('button', { class: 'fab', type: 'button', 'aria-expanded': 'false', 'aria-controls': 'stage' },
+    icon('device'), 'Preview', h('span', { class: 'dot', 'aria-hidden': 'true' }))
+  const ed = h('div', { class: 'ed' }, rail, form, stage, fab)
+  const setStage = (on, focus = true) => {
+    ed.classList.toggle('show-stage', on)
+    fab.setAttribute('aria-expanded', String(on))
+    form.inert = rail.inert = top.inert = on
+    document.documentElement.style.overflow = on ? 'hidden' : ''
+    if (focus) (on ? E.els.stageClose : fab).focus()
+  }
+  fab.addEventListener('click', () => setStage(true))
+  E.els.stageClose.addEventListener('click', () => setStage(false))
+  const onEsc = (e) => { if (e.key === 'Escape' && ed.classList.contains('show-stage')) setStage(false) }
+  const wide = matchMedia('(min-width: 1041px)')
+  const onWide = () => { if (wide.matches && ed.classList.contains('show-stage')) setStage(false, false) }
+  window.addEventListener('keydown', onEsc)
+  wide.addEventListener('change', onWide)
+  cleanup.push(() => window.removeEventListener('scroll', onScroll), () => window.removeEventListener('keydown', onEsc),
+    () => wide.removeEventListener('change', onWide), () => { document.documentElement.style.overflow = '' })
+
+  app.replaceChildren(top, ed)
+  paintTiles()
+  spy()
 }
 
 /* ----- field scaffolding */
@@ -687,7 +746,7 @@ async function renameTo(to) {
 /* ----- 02 name */
 function nameFields() {
   const { D } = E
-  const nameIn = input({ value: D.name, maxlength: 60, placeholder: 'Creamy Corner', spellcheck: 'true', autocomplete: 'organization' })
+  const nameIn = input({ class: 'in name-in', value: D.name, maxlength: 60, placeholder: 'Creamy Corner', spellcheck: 'true', autocomplete: 'organization' })
   nameIn.addEventListener('input', () => {
     D.name = nameIn.value
     if (E.mode === 'new' && !E.slugTouched && E.els.slug && !E.els.slug.ctl.readOnly) {
@@ -735,6 +794,56 @@ const LOOK_ART = {
     `<rect x="9" y="53" width="42" height="9" rx="4.5" fill="var(--t-accent)"/>` +
     [68, 76, 84].map((y) => `<rect x="9" y="${y}" width="15" height="2.5" rx="1" fill="var(--t-ink)" fill-opacity=".7"/><path d="M27 ${y + 1.6}h17" stroke="var(--t-ink)" stroke-opacity=".45" stroke-width="1" stroke-dasharray="1 2"/><rect x="46" y="${y}" width="5" height="2.5" rx="1" fill="var(--t-ink)" fill-opacity=".7"/>`).join('') +
     `</g>`,
+  // magazine front page: thick rule, nameplate, ruled tagline, one accent lead story, numbered contents
+  masthead: (id) =>
+    `<defs><clipPath id="${id}"><rect width="60" height="96" rx="7"/></clipPath></defs><g clip-path="url(#${id})">` +
+    `<rect width="60" height="96" fill="var(--t-bg)"/>` +
+    `<g fill="var(--t-ink)"><rect x="7" y="8" width="46" height="2.2"/><rect x="7" y="12.5" width="6" height="6"/>` +
+    `<rect x="39" y="14.7" width="14" height="1.6" fill-opacity=".7"/><rect x="7" y="21" width="46" height=".7"/>` +
+    `<rect x="10" y="25" width="40" height="8.5" rx="1"/><rect x="7" y="37" width="46" height=".7"/>` +
+    `<rect x="17" y="40" width="26" height="1.8" fill-opacity=".55"/><rect x="7" y="44" width="46" height=".7"/></g>` +
+    `<rect x="7" y="49" width="46" height="13" fill="var(--t-accent)"/><rect x="11" y="53.6" width="24" height="3.8" fill="var(--t-on)"/>` +
+    `<path d="M43 55.5h5.5M46.5 53.5l2 2-2 2" fill="none" stroke="var(--t-on)" stroke-width="1.1"/>` +
+    [68, 77, 86].map((y) => `<g fill="var(--t-ink)"><rect x="7" y="${y}" width="5" height="3" fill-opacity=".55"/><rect x="15" y="${y}" width="${y === 77 ? 19 : 26}" height="3"/><rect x="7" y="${y + 6}" width="46" height=".7"/></g>`).join('') +
+    `</g>`,
+  // gig poster: accent field with the stacked name and a sticker, ink tape, hard-shadow slabs
+  poster: (id) =>
+    `<defs><clipPath id="${id}"><rect width="60" height="96" rx="7"/></clipPath></defs><g clip-path="url(#${id})">` +
+    `<rect width="60" height="96" fill="var(--t-bg)"/><rect width="60" height="38" fill="var(--t-accent)"/>` +
+    `<circle cx="48.4" cy="11.4" r="6" fill="var(--t-ink)"/><circle cx="47" cy="10" r="6" fill="var(--t-bg)" stroke="var(--t-ink)" stroke-width="1.5"/>` +
+    `<rect x="6" y="15" width="34" height="8" fill="var(--t-on)"/><rect x="6" y="25" width="24" height="8" fill="var(--t-on)"/>` +
+    `<rect y="37" width="60" height="10.5" fill="var(--t-ink)"/><rect x="6" y="41.2" width="30" height="2.2" fill="var(--t-bg)"/>` +
+    `<rect x="9.5" y="56.5" width="44" height="12" fill="var(--t-accent)"/><rect x="7" y="54" width="44" height="12" fill="var(--t-ink)"/>` +
+    `<rect x="17" y="54" width=".9" height="12" fill="var(--t-bg)"/><rect x="21" y="58" width="21" height="4" fill="var(--t-bg)"/>` +
+    [73, 84].map((y) => `<rect x="8.9" y="${y + 1.9}" width="44" height="8" fill="var(--t-ink)"/><rect x="7" y="${y}" width="44" height="8" fill="var(--t-bg)" stroke="var(--t-ink)" stroke-width="1.3"/>` +
+      `<rect x="15.6" y="${y}" width="1.3" height="8" fill="var(--t-ink)"/><rect x="20" y="${y + 2.9}" width="${y === 73 ? 18 : 13}" height="2.2" fill="var(--t-ink)"/>`).join('') +
+    `</g>`,
+  // phone home screen: soft cover, logo punched into it, one accent tile, a grid of toned tiles with wells
+  tiles: (id) =>
+    `<defs><clipPath id="${id}"><rect width="60" height="96" rx="7"/></clipPath></defs><g clip-path="url(#${id})">` +
+    `<rect width="60" height="96" fill="var(--t-bg)"/>` +
+    `<rect x="4" y="4" width="52" height="23" rx="8" fill="var(--t-ink)" fill-opacity=".14"/>` +
+    `<rect x="8" y="19" width="13" height="13" rx="4.5" fill="var(--t-ink)" stroke="var(--t-bg)" stroke-width="2"/>` +
+    `<rect x="7" y="36.5" width="28" height="5" rx="1.5" fill="var(--t-ink)"/><rect x="7" y="44" width="38" height="2.2" rx="1" fill="var(--t-ink)" fill-opacity=".45"/>` +
+    `<rect x="4" y="51" width="52" height="13" rx="6.5" fill="var(--t-accent)"/><rect x="10" y="55.7" width="22" height="3.6" rx="1.2" fill="var(--t-on)"/>` +
+    `<circle cx="48.5" cy="57.5" r="3.8" fill="var(--t-on)"/>` +
+    [4, 31].map((x) => `<rect x="${x}" y="67" width="25" height="25" rx="7.5" fill="var(--t-ink)" fill-opacity=".1"/><circle cx="${x + 7.5}" cy="74.5" r="4" fill="var(--t-bg)"/>` +
+      `<rect x="${x + 4}" y="84.5" width="${x === 4 ? 14 : 11}" height="2.6" rx="1" fill="var(--t-ink)" fill-opacity=".75"/>`).join('') +
+    `</g>`,
+  // printed slip on a counter: torn ends, dashed rules, an accent ticket stub, line items, a barcode
+  receipt: (id) =>
+    `<defs><clipPath id="${id}"><rect width="60" height="96" rx="7"/></clipPath></defs><g clip-path="url(#${id})">` +
+    `<rect width="60" height="96" fill="var(--t-bg)"/><rect width="60" height="96" fill="var(--t-ink)" fill-opacity=".2"/>` +
+    `<path d="M9 10l3-3 3 3 3-3 3 3 3-3 3 3 3-3 3 3 3-3 3 3 3-3 3 3 3-3 3 3V86l-3 3-3-3-3 3-3-3-3 3-3-3-3 3-3-3-3 3-3-3-3 3-3-3-3 3-3-3z" fill="var(--t-bg)"/>` +
+    `<rect x="19" y="15" width="22" height="5" rx="1" fill="var(--t-ink)"/><rect x="17" y="22.5" width="26" height="1.8" rx=".9" fill="var(--t-ink)" fill-opacity=".5"/>` +
+    `<path d="M13 28.5h34M13 67.5h34" fill="none" stroke="var(--t-ink)" stroke-width=".9" stroke-dasharray="2.2 1.6"/>` +
+    `<rect x="13" y="32.5" width="34" height="11" rx="2" fill="var(--t-accent)"/><circle cx="13" cy="38" r="2.3" fill="var(--t-bg)"/><circle cx="47" cy="38" r="2.3" fill="var(--t-bg)"/>` +
+    `<rect x="20" y="36.3" width="20" height="3.4" rx="1" fill="var(--t-on)"/>` +
+    [48.5, 55, 61.5].map((y, i) => `<g fill="var(--t-ink)" fill-opacity=".75"><rect x="13" y="${y}" width="3.5" height="2.4"/><rect x="19" y="${y}" width="${[15, 11, 17][i]}" height="2.4"/><rect x="42" y="${y}" width="5" height="2.4"/></g>`).join('') +
+    `<path d="M15 71.5v8M17.2 71.5v8M20.4 71.5v8M22.2 71.5v8M25.8 71.5v8M28.2 71.5v8M30 71.5v8M33.4 71.5v8M35.4 71.5v8M38.8 71.5v8M40.6 71.5v8M43.4 71.5v8M45 71.5v8" fill="none" stroke="var(--t-ink)" stroke-width="1.1"/>` +
+    `<path d="M18.8 71.5v8M27 71.5v8M37 71.5v8" fill="none" stroke="var(--t-ink)" stroke-width="1.9"/>` +
+    `<rect x="20" y="82" width="20" height="1.6" rx=".8" fill="var(--t-ink)" fill-opacity=".5"/>` +
+    `</g>`,
   _: (id) =>
     `<defs><clipPath id="${id}"><rect width="60" height="96" rx="7"/></clipPath></defs><g clip-path="url(#${id})">` +
     `<rect width="60" height="96" fill="var(--t-bg)"/>` +
@@ -754,18 +863,22 @@ function lookTiles() {
     const art = (LOOK_ART[l.id] || LOOK_ART._)(`clip-${l.id}`)
     wrap.append(h('label', { class: 'tile' }, radio,
       frag(`<svg class="tile-art" viewBox="0 0 60 96" aria-hidden="true" focusable="false">${art}</svg>`),
-      h('span', { class: 'tile-name' }, l.label, frag(svgMarkup('check').replace('class="ic"', 'class="ic tick"')))))
+      h('span', { class: 'tile-name' }, frag(svgMarkup('check').replace('class="ic"', 'class="ic tick"')), l.label)))
   }
   paintTiles()
   return h('div', { class: 'f', dataset: { path: 'look' } }, wrap, h('p', { class: 'err' }))
 }
+// The draft's colours, handed to the look sketches and the stage rings.
 function paintTiles() {
   const t = E.D.theme
-  const s = E.els.tiles?.style
-  if (!s) return
-  s.setProperty('--t-bg', normHex(t.bg) || '#ffffff')
-  s.setProperty('--t-ink', normHex(t.ink) || '#0f2b29')
-  s.setProperty('--t-accent', normHex(t.accent) || '#1c4d4a')
+  const bg = normHex(t.bg) || '#ffffff', ink = normHex(t.ink) || '#0f2b29', ac = normHex(t.accent) || '#1c4d4a'
+  for (const el of [E.els.tiles, E.els.stage]) {
+    if (!el) continue
+    el.style.setProperty('--t-bg', bg)
+    el.style.setProperty('--t-ink', ink)
+    el.style.setProperty('--t-accent', ac)
+    el.style.setProperty('--t-on', onAccent(bg, ink, ac))
+  }
 }
 
 /* ----- 04 colours */
@@ -776,10 +889,10 @@ function colourFields() {
     st.palettes.map((p) => h('button', {
       class: 'pal', type: 'button', 'data-palette': p.id, 'aria-pressed': 'false',
       title: `${p.label}: background ${p.bg}, text ${p.ink}, accent ${p.accent}`,
+      style: { '--p-bg': p.bg, '--p-ink': p.ink, '--p-ac': p.accent },
       onclick: () => pickPalette(p),
     },
-    h('span', { class: 'pal-sw', 'aria-hidden': 'true' },
-      h('i', { style: { background: p.bg } }), h('i', { style: { background: p.ink } }), h('i', { style: { background: p.accent } })),
+    h('span', { class: 'pal-card', 'aria-hidden': 'true' }, h('span', { class: 'pal-aa' }, 'Aa'), h('span', { class: 'pal-btn' })),
     h('span', { class: 'pal-name' }, p.label))))
   E.els.palettes = chips
   const rows = [
@@ -853,23 +966,53 @@ function paintRatios() {
 const FONT_SAMPLE = { heading: 'Your business name', tagline: 'A short line about what you do', body: 'Links and details read like this.' }
 function fontPickers() {
   const { D, st } = E
+  const fam = (id) => `"${previewFamily(id)}", system-ui, sans-serif`
+  const paints = []
   const one = (key, label, bodyOnly) => {
+    const groups = groupFonts(st.fonts, { bodyOnly })
     const sel = h('select', { class: 'in font-select', 'data-part': `font-${key}` })
-    for (const g of groupFonts(st.fonts, { bodyOnly })) {
+    for (const g of groups) {
       sel.append(h('optgroup', { label: g.label },
-        g.fonts.map((f) => h('option', { value: f.id, style: { 'font-family': `"${previewFamily(f.id)}", system-ui, sans-serif` } }, f.family))))
+        g.fonts.map((f) => h('option', { value: f.id, style: { 'font-family': fam(f.id) } }, f.family))))
     }
     if (![...sel.options].some((o) => o.value === D.font[key])) sel.append(h('option', { value: D.font[key] }, `${D.font[key]} (not available here)`))
     sel.value = D.font[key]
-    const sample = h('p', { class: 'font-sample', 'aria-hidden': 'true' }, FONT_SAMPLE[key])
+    const sample = h('p', { class: 'font-sample', 'aria-hidden': 'true' })
+    // the specimen tray: every face drawn in itself. Built on first open, so closed pickers load no font files.
+    const tray = h('div', { class: 'faces', id: `faces-${key}`, role: 'group', 'aria-label': `${label} faces`, hidden: true })
+    const browse = h('button', { class: 'btn font-browse', type: 'button', 'aria-expanded': 'false', 'aria-controls': `faces-${key}` }, h('span', null, 'See the faces'), icon('chev'))
+    browse.addEventListener('click', () => {
+      if (!tray.firstChild) {
+        for (const g of groups) {
+          tray.append(h('p', { class: 'faces-g' }, g.label), h('div', { class: 'faces-row' }, g.fonts.map((f) =>
+            h('button', {
+              class: 'face-opt', type: 'button', 'data-font': f.id, 'aria-pressed': String(f.id === D.font[key]),
+              onclick: () => { sel.value = f.id; sel.dispatchEvent(new Event('change')) },
+            },
+            h('span', { class: 'face-ag', 'aria-hidden': 'true', style: { 'font-family': fam(f.id), 'font-weight': key === 'heading' ? '600' : '400' } }, 'Ag'),
+            h('span', { class: 'face-n' }, f.family)))))
+        }
+      }
+      const open = tray.hidden
+      tray.hidden = !open
+      browse.setAttribute('aria-expanded', String(open))
+      browse.firstChild.textContent = open ? 'Hide the faces' : 'See the faces'
+    })
     const paint = () => {
-      sample.style.fontFamily = `"${previewFamily(D.font[key])}", system-ui, sans-serif`
+      const own = key === 'heading' ? D.name.trim() : key === 'tagline' ? D.tagline.trim() : ''
+      sample.textContent = own || FONT_SAMPLE[key]
+      sample.style.fontFamily = sel.style.fontFamily = fam(D.font[key])
       sample.style.fontWeight = key === 'heading' ? '600' : '400'
+      sample.style.fontSize = key === 'heading' ? '' : key === 'tagline' ? '20px' : '16px'
+      for (const b of tray.querySelectorAll('[data-font]')) b.setAttribute('aria-pressed', String(b.dataset.font === D.font[key]))
     }
     paint()
+    paints.push(paint)
     sel.addEventListener('change', () => { D.font[key] = sel.value; paint(); changed() })
-    return field({ label, path: `font.${key}`, control: sel, extra: sample })
+    return field({ label, path: `font.${key}`, control: sel, extra: [browse, sample, tray], cls: 'font' })
   }
+  // the samples speak the page's own name and tagline, so they follow what is typed
+  E.els.form.addEventListener('input', () => { for (const p of paints) p() })
   return [one('heading', 'Heading font', false), one('tagline', 'Tagline font', false), one('body', 'Body font', true)]
 }
 
@@ -938,24 +1081,38 @@ function imageField(key, label, hint) {
 }
 
 /* ----- 07 blocks */
-const BLOCK_ICON = { link: 'arrow', heading: 'heading', text: 'text', socials: 'socials', video: 'video' }
+const BLOCK_ICON = { link: 'link', heading: 'heading', text: 'text', socials: 'socials', video: 'video' }
 const FIRST_PART = { link: 'url', heading: 'text', text: 'text', socials: 'kind-0', video: 'url' }
+const HEAD_PARTS = ['toggle', 'up', 'down', 'remove']
 const kindLabel = (k) => k.label || 'Custom link'
 const schemeInput = (scheme) => (scheme === 'tel:' ? 'tel' : scheme === 'mailto:' ? 'email' : 'url')
 
 function blockSection() {
   const list = h('ol', { class: 'rows blocks', 'aria-label': 'Blocks' })
   const menu = h('div', { class: 'add-menu', role: 'group', 'aria-label': 'Add a block' })
-  const count = h('p', { class: 'hint block-count', 'aria-live': 'polite' })
+  const count = h('span', { class: 'hint block-count', 'aria-live': 'polite' })
   const btns = {}
   for (const t of BLOCK_TYPES) {
-    btns[t.type] = h('button', { class: 'btn', type: 'button', 'data-add': t.type, title: t.hint, onclick: () => addOfType(t) }, icon('plus'), t.label)
+    btns[t.type] = h('button', { class: 'add-tile', type: 'button', 'data-add': t.type, title: t.hint, onclick: () => addOfType(t) },
+      h('span', { class: 'block-ic', 'aria-hidden': 'true' }, icon(BLOCK_ICON[t.type])), h('strong', null, t.label), h('small', null, t.hint))
     menu.append(btns[t.type])
   }
-  E.els.blocks = { list, menu, count, btns }
+  // PRESENTATION state: which cards are open. A new page starts open; an existing one starts as a tidy stack.
+  E.open = new Set(E.mode === 'new' ? E.D.blocks.map((b) => b.id) : [])
+  const all = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', 'data-part': 'toggle-all' })
+  all.addEventListener('click', () => {
+    E.open = new Set(E.open.size < E.D.blocks.length ? E.D.blocks.map((b) => b.id) : [])
+    renderBlocks()
+    all.focus()
+  })
+  E.els.blocks = { list, menu, count, btns, all }
   renderBlocks()
-  return h('div', { class: 'f', dataset: { path: 'blocks' } }, list, h('p', { class: 'err' }), h('div', { class: 'adds' }, menu, count))
+  return h('div', { class: 'f', dataset: { path: 'blocks' } },
+    h('div', { class: 'blocks-bar' }, h('span', { class: 'hint' }, 'Top to bottom, the way the page shows them. The first link is the main button.'), all),
+    list, h('p', { class: 'err' }),
+    h('div', { class: 'add-tray' }, h('p', { class: 'add-title' }, 'Add a block', count), menu))
 }
+const paintToggleAll = () => { E.els.blocks.all.textContent = E.open.size < E.D.blocks.length ? 'Open all' : 'Close all' }
 
 function addOfType(t) {
   const { D, st } = E
@@ -971,6 +1128,10 @@ function addOfType(t) {
 function renderBlocks(focus) {
   const { D, st } = E
   const { list, count, btns } = E.els.blocks
+  // a card that is about to take focus inside its body opens first; cards that are gone leave the open set
+  if (focus && !HEAD_PARTS.includes(focus.part)) E.open.add(focus.id)
+  for (const id of E.open) if (!D.blocks.some((b) => b.id === id)) E.open.delete(id)
+  paintToggleAll()
   list.replaceChildren()
   const firstLink = D.blocks.findIndex((b) => b.type === 'link')
   D.blocks.forEach((b, i) => list.append(blockCard(b, i, i === firstLink)))
@@ -1013,6 +1174,21 @@ function counter(ctl, max) {
   return el
 }
 
+// What a closed card says about itself.
+function blockSummary(b) {
+  const bare = (u) => u.trim().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
+  if (b.type === 'link') {
+    const k = kindLabel(E.st.kinds.find((x) => x.id === b.kind) || {})
+    const label = b.label.trim()
+    return { title: label || k, sub: [label ? k : 'Link', bare(b.url) || 'no address yet'].join(' · ') }
+  }
+  if (b.type === 'heading') return { title: b.text.trim(), sub: 'Heading' }
+  if (b.type === 'text') return { title: b.text.trim().split('\n')[0], sub: 'Text' }
+  if (b.type === 'video') return { title: bare(b.url), sub: 'Video' }
+  const names = b.items.map((it) => (E.st.kinds.find((x) => x.id === it.kind) || {}).label || it.kind)
+  return { title: names.join(', '), sub: `Socials · ${plural(b.items.length, 'icon')}` }
+}
+
 function blockCard(b, i, isMain) {
   const { D } = E
   const n = i + 1
@@ -1028,14 +1204,27 @@ function blockCard(b, i, isMain) {
     say(`${meta.label} moved to position ${to + 1} of ${D.blocks.length}`)
     changed()
   }
-  const kindIcon = h('span', { class: 'row-ic' }, icon(b.type === 'link' && G[b.kind] ? b.kind : BLOCK_ICON[b.type]))
+  const open = E.open.has(b.id)
+  const bodyId = `blk-${b.id}`
+  const kindIcon = h('span', { class: 'block-ic', 'aria-hidden': 'true' }, icon(b.type === 'link' && G[b.kind] ? b.kind : BLOCK_ICON[b.type]))
   const body = b.type === 'link' ? linkBody(b, i, kindIcon)
     : b.type === 'socials' ? socialsBody(b, i)
     : b.type === 'video' ? videoBody(b, i)
     : textBody(b, i)
-  return h('li', { class: `row block block-${b.type}${isMain ? ' main' : ''}`, dataset: { path: `blocks[${i}]`, id: b.id, type: b.type } },
-    h('div', { class: 'row-h' }, kindIcon,
-      h('span', { class: 'row-t' }, isMain ? h('span', { class: 'tag' }, 'Main button') : `${meta.label} ${n}`),
+  const sumT = h('strong'), sumS = h('span')
+  const paintSum = () => {
+    const s = blockSummary(b)
+    sumT.textContent = s.title || 'Nothing here yet'
+    sumT.classList.toggle('empty', !s.title)
+    sumS.textContent = s.sub
+  }
+  paintSum()
+  const toggle = h('button', { class: 'block-toggle', type: 'button', 'data-part': 'toggle', 'aria-expanded': String(open), 'aria-controls': bodyId },
+    h('span', { class: 'block-no', 'aria-hidden': 'true' }, n), kindIcon, h('span', { class: 'block-sum' }, sumT, sumS),
+    isMain ? h('span', { class: 'tag' }, 'Main button') : null,
+    frag(svgMarkup('chev').replace('class="ic"', 'class="ic chev"')))
+  const li = h('li', { class: `block block-${b.type}${isMain ? ' main' : ''}${open ? '' : ' shut'}`, dataset: { path: `blocks[${i}]`, id: b.id, type: b.type } },
+    h('div', { class: 'block-h' }, toggle,
       h('div', { class: 'row-acts' },
         btn('up', 'Move up', 'up', i === 0, () => move(-1)),
         btn('down', 'Move down', 'down', i === D.blocks.length - 1, () => move(1)),
@@ -1046,8 +1235,18 @@ function blockCard(b, i, isMain) {
           say(`${meta.label} ${n} removed`)
           changed()
         }))),
-    body,
+    h('div', { class: 'block-body', id: bodyId }, body),
     h('p', { class: 'err' }))
+  toggle.addEventListener('click', () => {
+    const shut = li.classList.toggle('shut')
+    toggle.setAttribute('aria-expanded', String(!shut))
+    if (shut) E.open.delete(b.id)
+    else E.open.add(b.id)
+    paintToggleAll()
+  })
+  // the closed card's line follows whatever is typed, picked or removed inside it
+  for (const ev of ['input', 'change', 'click']) li.addEventListener(ev, () => queueMicrotask(paintSum))
+  return li
 }
 
 function linkBody(b, i, kindIcon) {
@@ -1072,7 +1271,7 @@ function linkBody(b, i, kindIcon) {
     url.inputMode = schemeInput(nk.scheme)
     schemeHint.textContent = `Starts with ${nk.scheme === 'https:' ? 'https://' : nk.scheme}. Example: ${placeholderFor(kind, nk.scheme)}`
     labelLbl.textContent = kind === 'custom' ? 'Button text (required)' : 'Button text (optional)'
-    kindIcon.replaceChildren(icon(G[kind] ? kind : 'arrow'))
+    kindIcon.replaceChildren(icon(G[kind] ? kind : 'link'))
   }
   paintKind(b.kind)
   sel.addEventListener('change', () => {
@@ -1249,12 +1448,13 @@ function pressBed() {
   E.els.pulse = h('span', { class: 'pulse busy' })
   E.els.pulseText = h('span', null, 'Updating')
   E.els.pulse.append(E.els.pulseText)
-  E.els.perrs = h('div', { class: 'press-errs', hidden: true, 'aria-live': 'polite' })
-  return h('aside', { class: 'press on-teal', 'aria-label': 'Live preview' },
-    h('div', { class: 'press-in' },
-      h('div', { class: 'press-h' }, h('span', { title: '360 px is the most common Android screen width' }, h('strong', null, 'Preview'), ' 360 px'), E.els.pulse),
-      E.els.perrs,
-      h('div', { class: 'phone' }, h('div', { class: 'screen' }, E.els.empty, ...E.frames))))
+  E.els.perrs = h('div', { class: 'stage-errs', hidden: true, 'aria-live': 'polite' })
+  E.els.stageClose = h('button', { class: 'btn btn-ghost btn-icon stage-close', type: 'button', 'aria-label': 'Close preview' }, icon('close'))
+  E.els.stage = h('aside', { class: 'stage on-teal', id: 'stage', 'aria-label': 'Live preview' },
+    h('div', { class: 'stage-in' },
+      h('div', { class: 'stage-h' }, h('span', { title: '360 px is the most common Android screen width' }, h('strong', null, 'Live'), '360 px wide'), E.els.pulse, E.els.stageClose),
+      h('div', { class: 'phone' }, h('div', { class: 'screen' }, E.els.empty, ...E.frames), E.els.perrs)))
+  return E.els.stage
 }
 
 // DATA: debounced preview call. Answers can arrive out of order; only the newest counts.
@@ -1365,14 +1565,14 @@ function paintErrors() {
     w.el = el
     if (!el) continue
     el.setAttribute('data-warn', '')
-    el.append(h('p', { class: 'warn-note', role: 'note' }, icon('warn'), h('span', null, humanMsg(w.path, w.msg))))
+    el.append(h('p', { class: 'warn-note', role: 'note' }, icon('note'), h('span', null, humanMsg(w.path, w.msg))))
   }
   const ws = E.els.warnSummary
   if (ws) {
     if (warns.length) {
       ws.hidden = false
       ws.replaceChildren(
-        h('h2', null, icon('warn'), warns.length === 1 ? 'One thing to look at (you can still save and publish)' : `${warns.length} things to look at (you can still save and publish)`),
+        h('h2', null, icon('note'), warns.length === 1 ? 'One thing to look at (you can still save and publish)' : `${warns.length} things to look at (you can still save and publish)`),
         h('ul', null, warns.map((w) => h('li', null,
           w.el ? h('button', { type: 'button', onclick: () => focusField(w.el) }, pathName(w.path)) : pathName(w.path),
           `: ${humanMsg(w.path, w.msg)}`))))
@@ -1402,6 +1602,8 @@ function paintErrors() {
 }
 
 function focusField(el) {
+  // a field inside a closed block card: open the card first
+  el.closest('.block.shut')?.querySelector(':scope > .block-h [data-part="toggle"]')?.click()
   const ctl = el.querySelector('input:not([type="hidden"]):not([readonly]), select, textarea, button') || el
   el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
   ctl.focus({ preventScroll: true })
