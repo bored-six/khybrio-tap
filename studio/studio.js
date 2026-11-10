@@ -880,7 +880,7 @@ function lookTiles() {
 function paintTiles() {
   const t = E.D.theme
   const bg = normHex(t.bg) || '#ffffff', ink = normHex(t.ink) || '#0f2b29', ac = normHex(t.accent) || '#1c4d4a'
-  for (const el of [E.els.tiles, E.els.stage]) {
+  for (const el of [E.els.tiles, E.els.stage, E.els.bgTiles, E.els.bg?.body]) {
     if (!el) continue
     el.style.setProperty('--t-bg', bg)
     el.style.setProperty('--t-ink', ink)
@@ -1238,22 +1238,102 @@ async function grabPoster(v) {
   return blob
 }
 
+// PRESENTATION for the two sheets. Glyphs follow G: 24 grid, 1.75 stroke, round caps. A sharp corner is the one
+// place a miter join is allowed, because "square" has to read as square at 26px.
+G.reset = '<path d="M8.75 5.25l-4 4 4 4"/><path d="M4.75 9.25h9.5a5 5 0 0 1 0 10H9"/>'
+G.linear = '<rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M4 12.5L12.5 4M6 18L18 6M11.5 20l8.5-8.5"/>'
+G.radial = '<rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><circle cx="12" cy="12" r="5"/>' + dot(12, 12)
+const rawIcon = (inner) => frag(svgMarkup('arrow').replace(G.arrow, inner))
+const sgBtn = (rx, more = '') => `<rect x="2.75" y="6.5" width="18.5" height="11" rx="${rx}"${rx ? '' : ' stroke-linejoin="miter"'}${more}/>`
+const sgWord = '<path d="M8 12h8"/>'
+const sgBar = (y, hh) => `<rect x="3.5" y="${y}" width="17" height="${hh}" rx="${hh / 2}"/>`
+const sgCell = (x, y) => `<rect x="${x}" y="${y}" width="7.5" height="7.5" rx="2.5"/>`
+// One drawing per option value. The "Default" card repeats the look's own value (a dashed phone when it has none).
+const SG = {
+  buttonShape: { square: sgBtn(0) + sgWord, rounded: sgBtn(3.5) + sgWord, pill: sgBtn(5.5) + sgWord },
+  buttonFill: {
+    solid: sgBtn(3.5, ' fill="currentColor"') + '<path d="M8 12h8" stroke="var(--paper)"/>',
+    outline: sgBtn(3.5) + sgWord,
+    soft: sgBtn(3.5, ' fill="currentColor" fill-opacity=".2" stroke="none"') + sgWord,
+    glass: sgBtn(3.5, ' fill="currentColor" fill-opacity=".08"') + '<path d="M7.75 14.5l2.5-5M11.5 14.5l2.5-5"/>',
+  },
+  linkLayout: { list: sgBar(4, 4.5) + sgBar(9.75, 4.5) + sgBar(15.5, 4.5), grid: sgCell(3.5, 3.5) + sgCell(13, 3.5) + sgCell(3.5, 13) + sgCell(13, 13) },
+  align: { left: '<path d="M4.5 7h15M4.5 12h8.5M4.5 17h12"/>', center: '<path d="M4.5 7h15M7.75 12h8.5M6 17h12"/>' },
+  logoShape: {
+    square: '<rect x="4.75" y="4.75" width="14.5" height="14.5" stroke-linejoin="miter"/>' + dot(12, 12),
+    rounded: '<rect x="4.75" y="4.75" width="14.5" height="14.5" rx="4"/>' + dot(12, 12),
+    circle: '<circle cx="12" cy="12" r="7.75"/>' + dot(12, 12),
+  },
+  coverShape: {
+    banner: sgBtn(0) + '<path d="M2.75 15.25l4.75-4 3.75 3.25 2.75-2.25 7.25 4.5"/>',
+    rounded: sgBtn(3.5) + '<path d="M3.25 15l4.25-3.75 3.75 3.25 2.75-2.25 6.75 4"/>',
+    circle: '<circle cx="12" cy="12" r="7.75"/><path d="M5 15.25l3.5-3 3 2.6 2.3-1.9 4.6 3.6"/>',
+  },
+  spacing: { compact: sgBar(6.75, 4.5) + sgBar(12.75, 4.5), comfortable: sgBar(3.5, 6) + sgBar(14.5, 6) },
+  shadow: {
+    none: '<rect x="3.5" y="7" width="17" height="10" rx="2.5"/>',
+    soft: '<rect x="3.5" y="5.25" width="17" height="10" rx="2.5"/><path d="M7 19.5h10" stroke-width="2.75" stroke-opacity=".32"/>',
+    hard: '<rect x="3" y="5" width="15.5" height="10" rx="1.5"/><path d="M21 8.75V19H7" stroke-width="2.5"/>',
+  },
+}
+// Background minis, 60 x 72: only the ground changes, one button bar says "this is a page" (the palette swatch idiom).
+const BG_HILLS = '<path d="M-2 46L17 28l13 12 9-8 23 18v24H-2z" fill="var(--t-ink)" fill-opacity=".14" stroke="none"/><path d="M-2 46L17 28l13 12 9-8 23 18" stroke="var(--t-ink)"/>'
+const BG_ART = {
+  color: '',
+  gradient: '',
+  image: BG_HILLS + '<circle cx="44" cy="15" r="4.5" fill="var(--t-accent)" stroke="none"/>',
+  video: BG_HILLS + '<circle cx="30" cy="27" r="10.5" fill="var(--t-bg)" stroke="var(--t-ink)"/><path d="M27.25 22.5v9l7.5-4.5z" fill="var(--t-ink)" stroke="var(--t-ink)"/>',
+}
+const bgArt = (t) => frag(
+  `<svg viewBox="0 0 60 72" preserveAspectRatio="xMidYMid slice" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">` +
+  `<g class="bg-draw">${BG_ART[t]}</g><rect x="9" y="55" width="42" height="9" rx="4.5" fill="var(--t-accent)"/></svg>`)
+const cssStop = (s) => (REFS.some(([r]) => r === s) ? `var(--t-${s})` : normHex(s) || 'transparent')
+// A range input paints its own filled track from --pn (0..1).
+const fillRange = (rg) => rg.style.setProperty('--pn', String((Number(rg.value) - Number(rg.min)) / ((Number(rg.max) - Number(rg.min)) || 1)))
+const rangeIn = (props) => {
+  const rg = h('input', { class: 'rg', type: 'range', ...props })
+  rg.addEventListener('input', () => fillRange(rg))
+  fillRange(rg)
+  return rg
+}
+
 function backgroundFields() {
   const { D, st } = E
   const ui = E.bgUi = bgInit()
   const body = h('div', { class: 'bg-body', 'data-part': 'bg-body' })
   const typeBox = h('div', { class: 'bg-types', role: 'radiogroup', 'aria-label': 'Background type', 'data-part': 'bg-type' })
+  const arts = {}
   for (const [id, label] of BG_TYPES) {
     const r = h('input', { type: 'radio', name: 'bg-type', value: id, checked: ui.type === id })
     r.addEventListener('change', () => { if (r.checked) setType(id) })
-    typeBox.append(h('label', { class: 'bg-type' }, r, h('span', null, label)))
+    arts[id] = h('span', { class: 'tile-art bg-art', dataset: { t: id } }, bgArt(id))
+    typeBox.append(h('label', { class: 'tile bg-type' }, r, arts[id],
+      h('span', { class: 'tile-name' }, frag(svgMarkup('check').replace('class="ic"', 'class="ic tick"')), label)))
   }
-  E.els.bg = { body, paint: () => {} }
+  // PRESENTATION: the minis and the gradient strip wear what is really set (stops, shape, angle, the uploaded picture).
+  const minis = () => {
+    const g = ui.grad, stops = g.stops.map(cssStop).join(', ')
+    for (const el of [typeBox, body]) {
+      el.style.setProperty('--g-stops', stops)
+      el.style.setProperty('--g-img', g.shape === 'radial' ? `radial-gradient(130% 90% at 50% 0%, ${stops})` : `linear-gradient(${g.angle}deg, ${stops})`)
+    }
+    for (const t of ['image', 'video']) {
+      const m = ui.media[t], f = m && (t === 'video' ? m.poster : m.file)
+      arts[t].classList.toggle('has', !!f)
+      arts[t].style.backgroundImage = f ? `url("/p/${D.slug}/${encodeURIComponent(f)}?v=${ui.ver}")` : ''
+      arts[t].style.backgroundPosition = f ? `${m.focus[0]}% ${m.focus[1]}%` : ''
+    }
+  }
+  E.els.bg = { body, paint: () => {}, minis }
+  E.els.bgTiles = typeBox
   const setType = (t) => { ui.type = t; bgCommit(); render(); changed() }
   const render = () => {
     E.els.bg.paint = () => {}
-    body.replaceChildren(ui.type === 'gradient' ? gradientBody() : ui.type === 'color' ? h('p', { class: 'hint' }, 'The page background colour from Colours. Pick Gradient, Photo or Video to go further.') : mediaBody(ui.type))
+    body.replaceChildren(ui.type === 'gradient' ? gradientBody() : ui.type === 'color'
+      ? h('p', { class: 'hint bg-plain' }, h('i', { class: 'bg-sw', 'aria-hidden': 'true' }), h('span', null, 'The page background colour from Colours. Pick Gradient, Photo or Video to go further.'))
+      : mediaBody(ui.type))
     E.els.bg.paint()
+    minis()
   }
   E.els.bgPaint = () => E.els.bg.paint()
   render()
@@ -1262,21 +1342,31 @@ function backgroundFields() {
 
 function gradientBody() {
   const { D } = E, ui = E.bgUi, g = ui.grad
-  const upd = () => { bgCommit(); changed() }
+  const upd = () => { bgCommit(); E.els.bg.minis(); changed() }
   const rows = h('div', { class: 'bg-stops', 'data-part': 'bg-stops' })
   const paintRows = () => {
     rows.replaceChildren(...g.stops.map((s, i) => stopRow(i)))
+    rows.dataset.n = String(g.stops.length)
     addBtn.hidden = g.stops.length >= 3
+    paintChips()
   }
+  // A stop is a paint tag hanging off the strip: pin, numeral, what it is, three theme dots, a hex.
   const stopRow = (i) => {
     const hex = input({ maxlength: 7, placeholder: '#hex', 'aria-label': `Stop ${i + 1} hex colour`, 'data-part': `bg-stop-hex-${i}`, value: REFS.some(([r]) => r === g.stops[i]) ? '' : g.stops[i] })
+    const pin = h('i', { class: 'bg-pin', 'aria-hidden': 'true' })
+    const name = h('span', { class: 'bg-stop-name' })
     const chips = REFS.map(([ref, label]) => {
       const b = h('button', { class: 'bg-chip', type: 'button', 'data-ref': ref, 'aria-pressed': String(g.stops[i] === ref), 'aria-label': `Stop ${i + 1}: ${label}`, title: label },
-        h('i', { 'aria-hidden': 'true' }), h('span', null, label))
+        h('i', { 'aria-hidden': 'true' }), h('span', { class: 'sr' }, label))
       b.addEventListener('click', () => { g.stops[i] = ref; hex.value = ''; paintPressed(); upd() })
       return b
     })
-    const paintPressed = () => { for (const c of chips) c.setAttribute('aria-pressed', String(c.dataset.ref === g.stops[i])) }
+    const paintPressed = () => {
+      for (const c of chips) c.setAttribute('aria-pressed', String(c.dataset.ref === g.stops[i]))
+      const ref = REFS.find(([r]) => r === g.stops[i])
+      name.textContent = ref ? ref[1] : 'Custom'
+      pin.style.background = cssStop(g.stops[i])
+    }
     hex.addEventListener('input', () => {
       let v = hex.value.trim()
       if (!v) return
@@ -1284,53 +1374,67 @@ function gradientBody() {
       g.stops[i] = v
       paintPressed(); upd()
     })
-    const del = h('button', { class: 'btn btn-sm btn-ghost', type: 'button', 'data-part': 'bg-stop-remove', onclick: () => { g.stops.splice(i, 1); paintRows(); upd() } }, icon('close'), 'Remove')
+    const del = h('button', { class: 'btn btn-icon btn-sm btn-ghost btn-danger', type: 'button', 'data-part': 'bg-stop-remove', 'aria-label': `Remove stop ${i + 1}`, title: 'Remove', onclick: () => { g.stops.splice(i, 1); paintRows(); upd(); addBtn.focus() } }, icon('close'))
     del.hidden = g.stops.length < 3 || i < 2
-    return h('div', { class: 'bg-stop', dataset: { stop: i } }, h('span', { class: 'lbl' }, `Stop ${i + 1}`), h('div', { class: 'bg-chips' }, chips), hex, del)
+    paintPressed()
+    return h('div', { class: 'bg-stop', dataset: { stop: i } }, pin,
+      h('div', { class: 'bg-stop-h' }, h('span', { class: 'no', 'aria-hidden': 'true' }, String(i + 1)), name, del),
+      h('div', { class: 'bg-chips' }, chips), hex)
   }
   const addBtn = h('button', { class: 'btn btn-sm', type: 'button', 'data-part': 'bg-stop-add', onclick: () => { if (g.stops.length < 3) { g.stops.push('ink'); paintRows(); upd() } } }, icon('plus'), 'Add a third colour')
-  paintRows()
-
-  const shape = h('div', { class: 'bg-shape', role: 'radiogroup', 'aria-label': 'Gradient shape', 'data-part': 'bg-shape' },
-    ['linear', 'radial'].map((s) => {
-      const r = h('input', { type: 'radio', name: 'bg-shape', value: s, checked: g.shape === s })
-      r.addEventListener('change', () => { if (r.checked) { g.shape = s; angleF.hidden = s === 'radial'; upd() } })
-      return h('label', { class: 'bg-type' }, r, h('span', null, cap(s)))
-    }))
-  const num = input({ type: 'number', min: 0, max: 359, step: 1, value: String(g.angle), 'aria-label': 'Angle in degrees', 'data-part': 'bg-angle-num' })
-  const range = h('input', { type: 'range', min: 0, max: 359, step: 15, value: String(g.angle), 'aria-label': 'Angle', 'data-part': 'bg-angle' })
-  range.addEventListener('input', () => { g.angle = Number(range.value); num.value = String(g.angle); upd() })
-  num.addEventListener('input', () => {
-    const n = Number(num.value)
-    if (num.value === '' || !Number.isFinite(n)) return
-    g.angle = clampInt(n, 0, 359); range.value = String(g.angle); upd()
-  })
-  const angleF = h('div', { class: 'bg-angle' }, h('span', { class: 'lbl' }, 'Angle'), range, num, h('span', { class: 'hint' }, 'degrees'))
-  angleF.hidden = g.shape === 'radial'
   const paintChips = () => {
     const t = D.theme
     for (const [ref] of REFS) for (const i of rows.querySelectorAll(`[data-ref="${ref}"] i`)) i.style.background = normHex(t[ref]) || 'transparent'
   }
+  paintRows()
+
+  const shape = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Gradient shape', 'data-part': 'bg-shape' },
+    ['linear', 'radial'].map((s) => {
+      const r = h('input', { type: 'radio', name: 'bg-shape', value: s, checked: g.shape === s })
+      r.addEventListener('change', () => { if (r.checked) { g.shape = s; angleF.hidden = s === 'radial'; upd() } })
+      return h('label', { class: 'seg-o' }, r, h('span', null, icon(s), cap(s)))
+    }))
+  const num = input({ type: 'number', min: 0, max: 359, step: 1, value: String(g.angle), 'aria-label': 'Angle in degrees', 'data-part': 'bg-angle-num' })
+  const range = rangeIn({ min: 0, max: 359, step: 15, value: String(g.angle), 'aria-label': 'Angle', 'data-part': 'bg-angle' })
+  const dial = h('span', { class: 'bg-dial', 'aria-hidden': 'true' }, h('i'))
+  const paintAngle = () => { dial.style.setProperty('--a', `${g.angle}deg`); fillRange(range) }
+  range.addEventListener('input', () => { g.angle = Number(range.value); num.value = String(g.angle); paintAngle(); upd() })
+  num.addEventListener('input', () => {
+    const n = Number(num.value)
+    if (num.value === '' || !Number.isFinite(n)) return
+    g.angle = clampInt(n, 0, 359); range.value = String(g.angle); paintAngle(); upd()
+  })
+  const angleF = h('div', { class: 'bg-angle' }, h('span', { class: 'lbl' }, 'Angle'), dial, range, h('span', { class: 'bg-deg' }, num, h('span', { class: 'hint' }, 'degrees')))
+  angleF.hidden = g.shape === 'radial'
+  paintAngle()
   E.els.bg.paint = paintChips
-  return h('div', null,
-    h('div', { class: 'f', dataset: { path: 'background.stops' } }, h('span', { class: 'lbl' }, 'Colours'), rows, addBtn, h('p', { class: 'hint' }, 'Pick a theme colour, or type any hex.'), h('p', { class: 'err' })),
-    h('div', { class: 'f', dataset: { path: 'background.shape' } }, shape, h('p', { class: 'err' })),
-    h('div', { class: 'f', dataset: { path: 'background.angle' } }, angleF, h('p', { class: 'err' })))
+  return h('div', { class: 'bg-grad' },
+    h('div', { class: 'f', dataset: { path: 'background.stops' } }, h('span', { class: 'lbl' }, 'Colours'),
+      h('div', { class: 'bg-ramp', 'aria-hidden': 'true' }), rows, h('div', { class: 'bg-stops-foot' }, addBtn, h('p', { class: 'hint' }, 'Pick a theme colour, or type any hex.')), h('p', { class: 'err' })),
+    h('div', { class: 'bg-dir' },
+      h('div', { class: 'f', dataset: { path: 'background.shape' } }, h('span', { class: 'lbl' }, 'Shape'), shape, h('p', { class: 'err' })),
+      h('div', { class: 'f', dataset: { path: 'background.angle' } }, angleF, h('p', { class: 'err' }))))
 }
 
 function mediaBody(t) {
   const { D } = E, ui = E.bgUi
   const isVid = t === 'video'
   const m = bgMedia(t)
-  const status = h('p', { class: 'hint', 'aria-live': 'polite', 'data-part': 'bg-status' })
+  const status = h('p', { class: 'hint bg-status', 'aria-live': 'polite', 'data-part': 'bg-status' })
   const err = h('p', { class: 'err' })
   const notes = h('div', { class: 'bg-notes', 'data-part': 'bg-notes' })
   const fileIn = h('input', { type: 'file', accept: isVid ? '.mp4,video/mp4' : 'image/*,.heic,.heif', 'aria-label': isVid ? 'Choose video file' : 'Choose photo file', 'data-part': 'bg-file' })
   const pickLbl = h('span', null)
   const pick = h('label', { class: 'btn btn-sm pick' }, icon(isVid ? 'video' : 'image'), pickLbl, fileIn)
   const remove = h('button', { class: 'btn btn-sm btn-ghost btn-danger', type: 'button', 'data-part': 'bg-remove' }, icon('close'), 'Remove')
+  const dropT = h('p', { class: 'bg-drop-t' })
+  const mb = E.st.media && E.st.media.videoMax ? Math.round(E.st.media.videoMax / 1048576) : 15
+  const drop = h('div', { class: 'bg-drop' }, h('span', { class: 'block-ic', 'aria-hidden': 'true' }, icon(isVid ? 'video' : 'image')),
+    h('div', { class: 'bg-drop-c' }, dropT,
+      h('p', { class: 'hint' }, isVid ? `MP4 (H.264), up to ${mb} MB. A silent 6-10 s loop at 720p is plenty.` : 'Any photo works. It is shrunk here before it uploads.')),
+    h('div', { class: 'img-acts' }, pick, remove), h('i', { class: 'bg-bar', 'aria-hidden': 'true' }))
   const wrap = h('div', { class: 'f bg-media', dataset: { path: 'background.file' } }, h('span', { class: 'lbl' }, isVid ? 'Video (mp4)' : 'Photo'),
-    h('div', { class: 'img-acts' }, pick, remove), status, notes, err)
+    drop, status, notes, err)
   const fine = h('div', { class: 'bg-fine', 'data-part': 'bg-fine' })
 
   const local = (msg) => { status.textContent = ''; wrap.classList.add('bad'); err.replaceChildren(icon('warn'), h('span', null, msg)) }
@@ -1338,9 +1442,12 @@ function mediaBody(t) {
 
   const paintFine = () => {
     pickLbl.textContent = m.file ? 'Replace' : 'Choose file'
+    dropT.textContent = m.file ? m.file : isVid ? 'Drop a video here' : 'Drop a photo here'
+    wrap.classList.toggle('has', !!m.file)
     remove.hidden = !m.file
     fine.hidden = !m.file
     fine.replaceChildren()
+    E.els.bg.minis?.()
     if (!m.file) return
     const src = `/p/${D.slug}/${encodeURIComponent(isVid ? m.poster : m.file)}?v=${ui.ver}`
     const dotEl = h('i', { class: 'bg-dot', 'aria-hidden': 'true' })
@@ -1349,7 +1456,7 @@ function mediaBody(t) {
       dotEl.style.left = `${m.focus[0]}%`; dotEl.style.top = `${m.focus[1]}%`
       thumb.setAttribute('aria-label', `Focus point, ${m.focus[0]} percent across, ${m.focus[1]} percent down. Click the picture or use the arrow keys.`)
     }
-    const setFocus = (x, y) => { m.focus = [clampInt(x, 0, 100), clampInt(y, 0, 100)]; paintDot(); bgCommit(); changed() }
+    const setFocus = (x, y) => { m.focus = [clampInt(x, 0, 100), clampInt(y, 0, 100)]; paintDot(); bgCommit(); E.els.bg.minis?.(); changed() }
     thumb.addEventListener('click', (e) => {
       const r = thumb.getBoundingClientRect()
       if (r.width && r.height) setFocus(((e.clientX - r.left) / r.width) * 100, ((e.clientY - r.top) / r.height) * 100)
@@ -1362,28 +1469,32 @@ function mediaBody(t) {
     paintDot()
     const max = BLUR_MAX[t]
     const slider = (key, label, hi, onSet) => {
-      const rg = h('input', { type: 'range', min: 0, max: hi, step: 1, value: String(m[key]), 'aria-label': label, 'data-part': `bg-${key}` })
+      const rg = rangeIn({ min: 0, max: hi, step: 1, value: String(m[key]), 'aria-label': label, 'data-part': `bg-${key}` })
       const out = h('output', { class: 'bg-val' }, key === 'dim' ? `${m[key]}%` : `${m[key]} px`)
       rg.addEventListener('input', () => { m[key] = Number(rg.value); out.textContent = key === 'dim' ? `${m[key]}%` : `${m[key]} px`; onSet(); bgCommit(); changed() })
-      return h('div', { class: 'f bg-slider', dataset: { path: `background.${key}` } }, h('span', { class: 'lbl' }, label), rg, out, h('p', { class: 'err' }))
+      return h('div', { class: 'f bg-slider', dataset: { path: `background.${key}` } }, h('div', { class: 'lbl-row' }, h('span', { class: 'lbl' }, label), out), h('span', { class: 'bg-rg' }, rg), h('p', { class: 'err' }))
     }
-    const hint = h('p', { class: 'hint', 'data-part': 'bg-dim-hint' })
+    const hintText = h('span', null)
+    const hint = h('p', { class: 'bg-dim-hint', 'data-part': 'bg-dim-hint' }, icon('note'), hintText)
     const paintHint = () => {
       const n = dimRecommendation(D.theme.ink, D.theme.bg)
-      hint.textContent = n === null ? 'Check the Text and Background colours: even full dim cannot keep text readable with these.'
+      hintText.textContent = n === null ? 'Check the Text and Background colours: even full dim cannot keep text readable with these.'
         : n === 0 ? 'Any dim keeps text readable with these colours.' : `Dim ${n}% or more keeps text readable.`
+      // PRESENTATION: a sand note while the dim is under the line, a quiet hint once it is over; the tick on the track is the line.
+      hint.classList.toggle('low', n === null || m.dim < n)
+      dimF.classList.toggle('has-rec', n !== null && n > 0 && n <= 80)
+      dimF.style.setProperty('--rn', String(Math.min(1, (n || 0) / 80)))
     }
+    const dimF = slider('dim', 'Dim', 80, () => paintHint())
     paintHint()
     E.els.bg.paint = paintHint
     fine.append(
-      h('div', { class: 'f', dataset: { path: 'background.focus' } }, h('span', { class: 'lbl' }, 'Focus'), thumb, h('p', { class: 'hint' }, 'The part of the picture that stays in view on a narrow phone.'), h('p', { class: 'err' })),
-      slider('blur', 'Blur', max, () => {}),
-      slider('dim', 'Dim', 80, paintHint),
-      hint)
+      h('div', { class: 'f bg-focus', dataset: { path: 'background.focus' } }, h('span', { class: 'lbl' }, 'Focus'), thumb, h('p', { class: 'hint' }, 'The part of the picture that stays in view on a narrow phone.'), h('p', { class: 'err' })),
+      h('div', { class: 'bg-sliders' }, slider('blur', 'Blur', max, () => {}), dimF, hint))
   }
   paintFine()
 
-  const busy = (on) => { pick.classList.toggle('busy', on); fileIn.disabled = on }
+  const busy = (on) => { pick.classList.toggle('busy', on); wrap.classList.toggle('busy', on); fileIn.disabled = on }
   const finish = (next, warnings) => {
     Object.assign(m, next)
     ui.ver = Date.now(); E.uploaded = true
@@ -1447,35 +1558,57 @@ function styleFields() {
   const keys = Object.keys(st.style || {})
   const rows = {}
   const box = h('div', { class: 'style-grid', 'data-part': 'style-grid' })
+  const valueOf = (k) => (D.style[k] && st.style[k].includes(D.style[k]) ? D.style[k] : '')
   for (const k of keys) {
-    const sel = h('select', { class: 'in', 'data-part': `style-${k}`, 'aria-label': STYLE_LABEL[k] || k },
-      h('option', { value: '' }, 'Look default'), st.style[k].map((v) => h('option', { value: v }, cap(v))))
-    sel.value = D.style[k] && st.style[k].includes(D.style[k]) ? D.style[k] : ''
-    sel.addEventListener('change', () => { if (sel.value) D.style[k] = sel.value; else delete D.style[k]; changed() })
-    const note = h('p', { class: 'hint style-note' })
     const id = `f${++fid}`
-    sel.id = id
-    rows[k] = { sel, note }
-    box.append(h('div', { class: 'f style-opt', dataset: { path: `style.${k}`, key: k } }, h('label', { for: id }, STYLE_LABEL[k] || k), sel, note, h('p', { class: 'err' })))
+    // PRESENTATION: one radio group per key, each option a small drawing of what it does. '' = look default = key absent.
+    const group = h('div', { class: 'style-seg', role: 'radiogroup', 'aria-labelledby': id, 'data-part': `style-${k}` })
+    const opts = ['', ...st.style[k]].map((v) => {
+      const r = h('input', { type: 'radio', name: `style-${k}`, value: v })
+      r.addEventListener('change', () => { if (!r.checked) return; if (v) D.style[k] = v; else delete D.style[k]; paintReset(); changed() })
+      const art = h('span', { class: 'style-art', 'aria-hidden': 'true' }, v ? rawIcon((SG[k] && SG[k][v]) || G.device) : null)
+      const more = h('span', { class: 'sr' })
+      group.append(h('label', { class: v ? 'style-o' : 'style-o dflt' }, r, art, h('span', { class: 'style-cap' }, v ? cap(v) : 'Default'), more))
+      return { v, r, art, more }
+    })
+    const note = h('p', { class: 'hint style-note' }, icon('note'), h('span', null))
+    rows[k] = { opts, note, group }
+    box.append(h('div', { class: 'f style-opt', dataset: { path: `style.${k}`, key: k } }, h('span', { class: 'lbl', id }, STYLE_LABEL[k] || k), group, note, h('p', { class: 'err' })))
   }
-  const reset = h('button', { class: 'btn btn-sm', type: 'button', 'data-part': 'style-reset', onclick: () => { D.style = {}; paintStyle(); changed() } }, 'Reset to look default')
+  const count = h('span', { class: 'hint style-count', 'aria-live': 'polite' })
+  const reset = h('button', { class: 'btn btn-sm', type: 'button', 'data-part': 'style-reset', onclick: () => { D.style = {}; paintStyle(); changed() } }, icon('reset'), 'Reset to look default')
+  const paintReset = () => {
+    const n = Object.keys(D.style).length
+    reset.disabled = !n
+    count.textContent = n ? `${n} of ${keys.length} set by you` : 'Everything follows the look'
+  }
   const paintStyle = () => {
     const look = st.looks.find((l) => l.id === D.look)
     for (const k of keys) {
-      const { sel, note } = rows[k]
+      const { opts, note, group } = rows[k]
       const c = styleControl(look, k)
-      sel.disabled = !c.enabled
       const dv = look && look.styleDefaults ? look.styleDefaults[k] : null
-      sel.options[0].textContent = dv ? `Look default (${dv})` : 'Look default'
-      sel.value = D.style[k] && st.style[k].includes(D.style[k]) ? D.style[k] : ''
-      note.textContent = c.note
+      const cur = valueOf(k)
+      for (const o of opts) {
+        o.r.disabled = !c.enabled
+        o.r.checked = o.v === cur
+        if (!o.v) {
+          const own = dv && SG[k] && SG[k][dv]
+          o.art.replaceChildren(rawIcon(own || G.device))
+          o.art.classList.toggle('any', !own)
+          o.more.textContent = dv ? `(${dv})` : ''
+          o.r.setAttribute('aria-label', dv ? `Look default (${dv})` : 'Look default')
+        }
+      }
+      group.closest('.style-opt')?.classList.toggle('off', !c.enabled)
+      note.lastChild.textContent = c.note
       note.hidden = c.enabled
     }
-    reset.disabled = !Object.keys(D.style).length
+    paintReset()
   }
   E.els.stylePaint = paintStyle
   paintStyle()
-  return [box, h('div', { class: 'img-acts' }, reset)]
+  return [box, h('div', { class: 'style-foot' }, reset, count)]
 }
 
 /* ----- 08 blocks */
