@@ -42,8 +42,9 @@ export const BASE =
   `@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}`
 
 // Default renderer for every block type. `cls` is the class a link anchor gets.
-// Exactly one element per block carries data-block.
-export function blockHtml(ctx, b, cls = 'it') {
+// Exactly one element per block carries data-block. `arrow: false` leaves the trailing arrow
+// out of the markup: the look draws it once in CSS (ARROW) or does not show one at all.
+export function blockHtml(ctx, b, cls = 'it', arrow = true) {
   const { esc } = ctx
   if (b.type === 'heading') return `<h2 class="bh" data-block="heading">${esc(b.text)}</h2>`
   if (b.type === 'text') return `<p class="bt" data-block="text">${ctx.text(b.text)}</p>`
@@ -60,8 +61,24 @@ export function blockHtml(ctx, b, cls = 'it') {
   return (
     `${linkOpen(ctx, b, cls)}${ctx.icon(b.kind)}` +
     `<span class="lb">${esc(b.label)}${d ? `<span class="dt">${detailHtml(ctx, d)}</span>` : ''}</span>` +
-    `<span class="ar">${ctx.icon('arrow')}</span></a>`
+    (arrow ? `<span class="ar">${ctx.icon('arrow')}</span>` : '') +
+    `</a>`
   )
+}
+
+// The arrow glyph at 18px, drawn once in CSS for a ::after instead of 117 bytes of <svg> on
+// every link. It is the outline of icons.js `arrow` (24 grid, 1.75 stroke, round caps and joins)
+// scaled by .75: three capsules of radius .656, one per stroke segment. A data: mask would be
+// shorter, but the page CSP is img-src 'self'.
+export const ARROW =
+  `width:18px;height:18px;background:currentColor;clip-path:path("M3.562 8.344h10.875a.656.656 0 0 1 0 1.312h-10.875a.656.656 0 0 1 0-1.312z` +
+  `M10.777 4.411l4.125 4.125a.656.656 0 0 1-.928.928l-4.125-4.125a.656.656 0 0 1 .928-.928z` +
+  `M14.902 9.464l-4.125 4.125a.656.656 0 0 1-.928-.928l4.125-4.125a.656.656 0 0 1 .928.928z")`
+
+// The backdrop a page is drawn over, or null on a flat colour: 'gradient' | 'image' | 'video'.
+export const bgOf = (ctx) => {
+  const t = ctx.client.background && ctx.client.background.type
+  return t && t !== 'color' ? t : null
 }
 
 // Functional CSS for heading, text, socials and video blocks. Colour only from theme vars.
@@ -103,8 +120,8 @@ export function linkRuns(blocks) {
 
 // Bare text over a photo or video carries a halo in the page's own bg colour: invisible on a
 // flat page, a legible edge over the busiest pixel. Anything with its own fill resets it.
-export const halo = (sel) =>
-  `[data-bg=image] ${sel},[data-bg=video] ${sel}{text-shadow:0 0 1px var(--bg),0 0 5px var(--bg),0 0 12px var(--bg),0 0 12px var(--bg),0 0 28px var(--bg)}`
+export const HALO = `text-shadow:0 0 1px var(--bg),0 0 5px var(--bg),0 0 12px var(--bg),0 0 12px var(--bg),0 0 28px var(--bg)`
+export const halo = (sel) => `[data-bg=image] ${sel},[data-bg=video] ${sel}{${HALO}}`
 
 // A hard shadow is ink. Under an ink (solid) button it vanishes, so in hard-shadow mode the
 // button first gets a hairline of page colour, then the shadow: `.hs` on the look's root.
