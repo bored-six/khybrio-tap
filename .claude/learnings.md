@@ -23,3 +23,8 @@ Khybrio site stays in `bored-six/Khybrio` (old cards point there).
 - Uploading an image for a never-saved page leaves a folder with no client.js. Build and studio both
   skip such folders (`listClientFolders`), otherwise Publish would push a folder that breaks CI.
 - Studio saves rewrite client.js as plain JSON, so hand-written comments in client.js are lost on save.
+
+## 2026-11-10 - Brand
+- The main site's `khybrio-mark.svg` / `-clean.svg` / `khybrio-glyph.svg` were the OLD K-burst mark and
+  were still named as "the logo" in its ASSETS.md. The current mark is `khybrio-mark.png` (swirl on teal tile)
+  and `khybrio-glyph.png` (cream, no tile). Never copy brand files by hand: `npm run sync-brand`.

@@ -6,7 +6,7 @@ export default {
   look: 'card',
   theme: { bg: '#1c4d4a', ink: '#f5f7f6', accent: '#e8622d' },
   font: { display: 'fraunces', body: 'inter' },
-  logo: 'logo.svg',
+  logo: 'logo.png', // synced from the main site: npm run sync-brand
   links: [
     { kind: 'messenger', url: 'https://m.me/khybrio', label: 'Message us' },
     { kind: 'website', url: 'https://bored-six.github.io/Khybrio/', label: 'See what we do' },

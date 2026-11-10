@@ -14,6 +14,8 @@ do not apply here. The global `~/.claude/CLAUDE.md` does.
   Switching hosts = edit `site.config.js` only. Never rename a client folder once its chip exists.
 - Brand: teal-deep `#1c4d4a`, cream `#f5f7f6`, coral `#e8622d` (accent, sparingly), ink `#0f2b29`.
   Fraunces for display, Inter for body. No emojis, no stock icon packs: icons are hand-made in `src/icons.js`.
+- **Khybrio's own logo is never copied by hand.** It comes from the main site via `npm run sync-brand`
+  (list in `brand/sync.json`). `npm test` fails when the main site's logo changes and this repo has not synced.
 - Real client details go in only with the client's written permission (same rule as the main site).
 
 ## Adding or editing a client

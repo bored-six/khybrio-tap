@@ -1,0 +1,7 @@
+{
+  "clients/khybrio/logo.png": {
+    "from": "public/assets/brand/khybrio-mark.png",
+    "sourceSha256": "7da161a75194fc3974c460820857c977529a2d886b763a6ccf290a8fb0146b99",
+    "outputSha256": "3c0e498ec0baddecf0569bcdcecd495eca22abac1414100acaf21123df478c85"
+  }
+}

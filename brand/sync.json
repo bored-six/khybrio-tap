@@ -1,0 +1,11 @@
+{
+  "source": "../Khybrio",
+  "files": [
+    {
+      "from": "public/assets/brand/khybrio-mark.png",
+      "to": "clients/khybrio/logo.png",
+      "maxPx": 320,
+      "why": "Khybrio's own tap page. The swirl mark on its teal tile, so link previews read on any background."
+    }
+  ]
+}
