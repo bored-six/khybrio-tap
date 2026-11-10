@@ -13,6 +13,7 @@ import { icon } from '../icons.js'
 import { KINDS } from '../kinds.js'
 import { svgProblem } from '../assets.js'
 import { build, listClientFolders } from '../build.js'
+import QRCode from 'qrcode'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const studioDir = resolve(here, '../../studio')
@@ -268,6 +269,25 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
           throw new HttpError(404, 'Not found')
         }
         return await serveFile(res, full)
+      }
+      // QR for a page's live URL (the same address the NFC chip gets). Public data, so plain GET:
+      // an <img> cannot send the studio header. Only for a client whose client.js loads.
+      const qm = /^\/qr\/([^/]+)\.(png|svg)$/.exec(pathname)
+      if (qm) {
+        const [, slug, ext] = qm
+        if (!isSlug(slug) || !(await isFile(join(clientsDir, slug, 'client.js')))) throw new HttpError(404, 'Not found')
+        try {
+          await loadClient(slug)
+        } catch {
+          throw new HttpError(404, 'Not found')
+        }
+        const liveUrl = `${site.origin}${site.base}${slug}/`
+        const opts = { errorCorrectionLevel: 'M', margin: 4, color: { dark: '#0f2b29', light: '#ffffff' } }
+        const body = ext === 'png' ? await QRCode.toBuffer(liveUrl, { ...opts, type: 'png', width: 1200 }) : await QRCode.toString(liveUrl, { ...opts, type: 'svg' })
+        const headers = { 'content-type': ext === 'png' ? 'image/png' : 'image/svg+xml; charset=utf-8', 'cache-control': 'no-store' }
+        if (url.searchParams.has('download')) headers['content-disposition'] = `attachment; filename="${slug}-qr.${ext}"`
+        res.writeHead(200, headers)
+        return res.end(body)
       }
       const pm = /^\/p\/([^/]+)\/([^/]+)$/.exec(pathname)
       if (pm) {

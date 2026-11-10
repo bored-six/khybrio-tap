@@ -55,6 +55,8 @@ const G = {
   // frame, hill line, the sun is the dot
   image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.75 16.25l4.75-4.75 4.75 4.75 2.25-2.25 4.75 4.75"/>' + dot(15.25, 9.25),
 }
+// QR: three finder squares, the data corner is the dot
+G.qr = '<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.5"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.5"/><path d="M14 14h2.75v2.75M20.5 14v6.5H14"/>' + dot(17.5, 17.5)
 G.pin = G.maps
 
 const svgMarkup = (name) =>
@@ -317,7 +319,26 @@ function clientCard(c, lookLabel, isPending) {
     h('div', { class: 'cc-acts' },
       h('a', { class: 'btn btn-sm', href }, icon('edit'), 'Edit'),
       h('a', { class: 'btn btn-sm', href: c.liveUrl, target: '_blank', rel: 'noopener', title: isPending ? 'Shows the last published version' : null }, icon('out'), 'Open live'),
-      copyBtn))
+      copyBtn,
+      h('button', { class: 'btn btn-sm', type: 'button', onclick: () => openQr(c, name) }, icon('qr'), 'QR code')))
+}
+
+// QR for the live link: the same address the NFC chip gets. SVG for print, PNG for chat and social.
+function openQr(c, name) {
+  const close = () => dlg.close()
+  const dlg = h('dialog', { class: 'qr-dlg', 'aria-labelledby': 'qr-title', onclose: () => dlg.remove() },
+    h('div', { class: 'qr-head' },
+      h('h2', { id: 'qr-title' }, name),
+      h('button', { class: 'btn btn-ghost btn-icon', type: 'button', 'aria-label': 'Close', onclick: close }, icon('close'))),
+    h('img', { class: 'qr-img', src: `/qr/${c.slug}.svg`, alt: `QR code for ${c.liveUrl}`, width: 280, height: 280 }),
+    h('p', { class: 'qr-url' }, c.liveUrl),
+    h('p', { class: 'qr-note' }, 'Same link as the NFC chip. Scan it once with your phone before printing.'),
+    h('div', { class: 'qr-acts' },
+      h('a', { class: 'btn btn-primary', href: `/qr/${c.slug}.svg?download=1`, download: `${c.slug}-qr.svg` }, 'Download for print (SVG)'),
+      h('a', { class: 'btn', href: `/qr/${c.slug}.png?download=1`, download: `${c.slug}-qr.png` }, 'Download image (PNG)')))
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) close() })
+  document.body.append(dlg)
+  dlg.showModal()
 }
 
 async function copyText(text) {

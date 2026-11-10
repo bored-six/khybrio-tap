@@ -354,3 +354,14 @@ select.in {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* QR dialog: paper sheet on a dimmed desk, QR on pure white for scanners */
+.qr-dlg { border: 1px solid var(--line); border-radius: 16px; padding: 20px; width: min(380px, calc(100vw - 32px)); background: var(--paper); color: var(--ink); }
+.qr-dlg::backdrop { background: rgba(15, 43, 41, 0.45); }
+.qr-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.qr-head h2 { font-family: var(--display); font-size: 22px; margin: 0; overflow-wrap: anywhere; }
+.qr-img { display: block; width: 100%; height: auto; aspect-ratio: 1; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.qr-url { margin: 12px 0 4px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.qr-note { margin: 0 0 16px; font-size: 13px; color: var(--muted); }
+.qr-acts { display: flex; flex-direction: column; gap: 8px; }
+.qr-acts .btn { justify-content: center; min-height: 44px; }

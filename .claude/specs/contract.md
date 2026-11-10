@@ -204,3 +204,9 @@ Login comes later (Supabase); until then the studio only ever runs on the owner'
 - Asset upload: `name` is lowercased, spaces -> `-`, then must match the asset regex from validate
   (svg/png/jpg/jpeg/webp). Max 3 MB. SVG must pass `svgProblem`. Creates the folder if missing
   (slug already checked). Overwrites a same-named file.
+
+### QR codes (studio)
+`GET /qr/:slug.png` (1200px) and `GET /qr/:slug.svg` encode exactly `{origin}{base}{slug}/`, the same
+URL as the NFC chip. Plain GET with no studio header (an `<img>` cannot send one; the URL is public).
+404 for a bad slug, a missing client or a client.js that does not load. `?download=1` adds
+`Content-Disposition: attachment; filename="<slug>-qr.<ext>"`. Dark #0f2b29 on white, ECC M, 4-module margin.

@@ -205,3 +205,43 @@ test('a folder with uploads but no client.js is not listed (abandoned new page)'
   const s = await (await api('/api/state')).json()
   assert.deepEqual(s.clients.map((c) => c.slug), ['real-one'])
 })
+
+// QR codes: the QR must decode to exactly the page's live URL. A wrong QR is invisible until printed.
+import { PNG } from 'pngjs'
+import jsQR from 'jsqr'
+
+async function decodePng(res) {
+  const png = PNG.sync.read(Buffer.from(await res.arrayBuffer()))
+  return jsQR(new Uint8ClampedArray(png.data), png.width, png.height)?.data ?? null
+}
+
+test('QR PNG decodes to the live URL, at least 1000px for print', async () => {
+  await seed('qr-cafe', valid('qr-cafe'))
+  const res = await fetch(`${base}/qr/qr-cafe.png`)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('content-type'), 'image/png')
+  const buf = Buffer.from(await res.clone().arrayBuffer())
+  assert.ok(PNG.sync.read(buf).width >= 1000)
+  assert.equal(await decodePng(res), 'https://bored-six.github.io/khybrio-tap/qr-cafe/')
+})
+
+test('QR SVG is a plain vector image with no script', async () => {
+  await seed('qr-cafe', valid('qr-cafe'))
+  const res = await fetch(`${base}/qr/qr-cafe.svg`)
+  assert.equal(res.status, 200)
+  assert.match(res.headers.get('content-type'), /image\/svg\+xml/)
+  const svg = await res.text()
+  assert.match(svg, /<svg\b/)
+  assert.equal(svgProblem(svg), null)
+})
+
+test('QR download sets a file name; unknown, invalid or broken slugs get no QR', async () => {
+  await seed('qr-cafe', valid('qr-cafe'))
+  const dl = await fetch(`${base}/qr/qr-cafe.png?download=1`)
+  assert.match(dl.headers.get('content-disposition') || '', /attachment; filename="qr-cafe-qr\.png"/)
+  assert.equal((await fetch(`${base}/qr/nobody-here.png`)).status, 404)
+  assert.equal((await fetch(`${base}/qr/Bad_Slug.png`)).status, 404)
+  assert.equal((await fetch(`${base}/qr/qr-cafe.gif`)).status, 404)
+  await seed('qr-broken', 'export default {{{')
+  assert.equal((await fetch(`${base}/qr/qr-broken.png`)).status, 404, 'no QR for a page that cannot build')
+})
