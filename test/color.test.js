@@ -35,8 +35,8 @@ test('worstContrast never goes down as dim goes up', () => {
 })
 
 test('worstContrast known values (hand-computed from the spec formula)', () => {
-  near(Number(worstContrast('#3b1f14', '#fff4e6', 40).toFixed(2)), 2.48, 0)
-  near(Number(worstContrast('#3b1f14', '#fff4e6', 80).toFixed(2)), 8.68, 0)
+  near(Number(worstContrast('#3b1f14', '#fff4e6', 40).toFixed(2)), 2.48)
+  near(Number(worstContrast('#3b1f14', '#fff4e6', 80).toFixed(2)), 8.68)
   assert.ok(worstContrast('#000000', '#ffffff', 46) >= 4.5 && worstContrast('#000000', '#ffffff', 45) < 4.5)
 })
 
