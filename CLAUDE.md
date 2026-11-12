@@ -29,9 +29,12 @@ do not apply here. The global `~/.claude/CLAUDE.md` does.
 Easiest: `npm run studio`, open http://localhost:4322/, click New page (or Edit), Save, then Publish live
 (uploads changed files to R2, then commits and pushes `clients/` as a backup).
 By hand: copy `clients/demo-cafe/` to `clients/<slug>/`, edit `client.js`, `npm run build` to check.
-The studio runs only on this Mac and has no login yet (planned: Supabase, admin-managed accounts).
+The studio runs only on this Mac. Login is Supabase (accounts only; files stay in `clients/` and R2): put
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`, make yourself admin once with
+`npm run studio-admin -- you@example.com`, then add co-workers on the studio's Team page. Co-workers reach the studio
+through a tunnel; set `STUDIO_PUBLIC_ORIGIN` to its https address. No Supabase keys = no login, localhost only.
 
 ## Commands
 - `npm test`, `npm run build`, `npm run dev` (serves `dist/` through the Worker handler at http://localhost:4321/)
 - `npx wrangler deploy` (Worker only; page content goes live through Publish, not a deploy)
-- `npm run studio` (dashboard at http://localhost:4322/)
+- `npm run studio` (dashboard at http://localhost:4322/), `npm run studio-admin -- <email>` (first admin)

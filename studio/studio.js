@@ -50,6 +50,8 @@ const G = {
 
   // studio-only glyphs, same rules
   plus: '<path d="M12 4.75v14.5M4.75 12h14.5"/>',
+  // two people: the front one whole, the back one only where it shows
+  team: '<circle cx="9.25" cy="8.5" r="3.25"/><path d="M3.75 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.25 5.5a3.25 3.25 0 0 1 0 6M17.25 14.25a5.5 5.5 0 0 1 3 5.25"/>',
   back: '<path d="M19.25 12H4.75M10.25 6.5L4.75 12l5.5 5.5"/>',
   up: '<path d="M12 19.25V4.75M6.5 10.25L12 4.75l5.5 5.5"/>',
   down: '<path d="M12 4.75v14.5M6.5 13.75l5.5 5.5 5.5-5.5"/>',
@@ -132,10 +134,11 @@ async function api(path, { method = 'GET', json, body, type } = {}) {
   }
   let data = null
   try { data = await res.json() } catch { data = null }
+  if (res.status === 401 && path !== '/api/login') setTimeout(() => openSignIn(), 0)
   return { status: res.status, ok: res.ok, data }
 }
 
-const S = { state: null, flash: null }
+const S = { state: null, flash: null, session: { login: false, user: null } }
 async function loadState() {
   const r = await api('/api/state')
   if (!r.ok || !r.data) throw new Error(r.offline ? 'The studio server is not running. Start it with npm run studio.' : `The server answered ${r.status}.`)
@@ -246,6 +249,7 @@ async function route() {
   const m = hash.match(/^#\/edit\/([^/]+)$/)
   window.scrollTo(0, 0)
   if (hash === '#/new') return screenEditor('new')
+  if (hash === '#/team') return screenTeam()
   if (m && SLUG_RE.test(decodeURIComponent(m[1]))) return screenEditor('edit', decodeURIComponent(m[1]))
   if (hash !== '#/' && hash !== '') history.replaceState(null, '', '#/')
   return screenHome()
@@ -256,7 +260,184 @@ function topBar(...kids) {
   return h('header', { class: 'top' },
     h('a', { class: 'brand', href: '#/', 'aria-label': 'Khybrio Studio, all pages' }, frag(MARK),
       h('span', { class: 'wm' }, 'Khybrio', h('span', null, 'Studio'))),
-    kids)
+    kids, accountBar())
+}
+
+/* ---------------------------------------------------------------- login (v4) */
+function accountBar() {
+  const u = S.session.user
+  if (!S.session.login || !u) return null
+  return h('div', { class: 'acct' },
+    h('span', { class: 'acct-who', title: u.email }, u.email),
+    u.role === 'admin' ? h('a', { class: 'btn btn-ghost btn-sm', href: '#/team' }, icon('team'), 'Team') : null,
+    h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: signOut }, 'Sign out'))
+}
+
+async function loadSession() {
+  const r = await api('/api/session')
+  if (r.ok && r.data) S.session = r.data
+  return S.session
+}
+
+async function signOut() {
+  if (guard && !guard()) return
+  guard = null
+  await api('/api/logout', { method: 'POST', json: {} })
+  S.session = { ...S.session, user: null }
+  app.replaceChildren()
+  openSignIn()
+}
+
+// Sign-in sits over whatever screen is open, so a session that ends mid-edit never throws the draft away.
+let signInOpen = false
+function openSignIn() {
+  if (signInOpen) return
+  signInOpen = true
+  S.session = { ...S.session, user: null }
+  const email = input({ type: 'email', id: 'si-email', autocomplete: 'username', required: true, spellcheck: 'false' })
+  const pass = input({ type: 'password', id: 'si-pass', autocomplete: 'current-password', required: true })
+  const err = h('p', { class: 'si-err', role: 'alert' })
+  const go = h('button', { class: 'btn btn-primary btn-big', type: 'submit' }, 'Sign in')
+  const form = h('form', { class: 'si-card', 'aria-labelledby': 'si-title' },
+    h('a', { class: 'brand', 'aria-hidden': 'true', tabindex: '-1' }, frag(MARK), h('span', { class: 'wm' }, 'Khybrio', h('span', null, 'Studio'))),
+    h('h1', { id: 'si-title' }, 'Sign ', h('em', null, 'in')),
+    h('div', { class: 'f' }, h('label', { for: 'si-email' }, 'Email'), email),
+    h('div', { class: 'f' }, h('label', { for: 'si-pass' }, 'Password'), pass),
+    err, go,
+    h('p', { class: 'hint' }, 'No login yet? Ask the studio admin to make one for you.'))
+  const wrap = h('div', { class: 'si', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'si-title' }, form)
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    err.textContent = ''
+    go.disabled = true
+    const r = await api('/api/login', { method: 'POST', json: { email: email.value, password: pass.value } })
+    go.disabled = false
+    if (r.ok && r.data && r.data.user) {
+      S.session = { login: true, user: r.data.user }
+      signInOpen = false
+      wrap.remove()
+      document.body.classList.remove('si-on')
+      // keep an open editor as it is; anything else redraws for the new account
+      if (!E || !document.contains(E.els?.state)) route()
+      else {
+        const top = document.querySelector('.top')
+        top?.querySelector('.acct')?.remove()
+        const bar = accountBar()
+        if (top && bar) top.append(bar)
+      }
+      say(`Signed in as ${r.data.user.email}`)
+      return
+    }
+    pass.value = ''
+    err.textContent = r.offline ? 'The studio server is not running.' : (r.data && r.data.error) || `The server answered ${r.status}.`
+    pass.focus()
+  })
+  document.body.classList.add('si-on')
+  document.body.append(wrap)
+  email.focus()
+}
+
+/* ---------------------------------------------------------------- team (v4, admins) */
+const ROLE_LABEL = { admin: 'Admin', editor: 'Editor' }
+const ROLE_HINT = 'Editors make, change and publish pages. Admins can also manage logins.'
+
+function passwordNote(title, email, password) {
+  const copyBtn = h('button', { class: 'btn btn-sm', type: 'button', onclick: async () => {
+    const ok = await copyText(`Khybrio Studio\n${location.origin}/\nEmail: ${email}\nPassword: ${password}`)
+    copyBtn.lastChild.textContent = ok ? 'Copied' : 'Copy failed'
+  } }, icon('copy'), h('span', null, 'Copy login'))
+  return h('div', { class: 'note pw-note', role: 'status' }, icon('check'),
+    h('div', null,
+      h('p', null, h('strong', null, title), ' ', h('span', null, 'Send this to them yourself. It is shown once and is not stored here.')),
+      h('p', { class: 'pw-line' }, h('span', null, email), h('code', { class: 'pw' }, password)),
+      copyBtn))
+}
+
+async function screenTeam() {
+  if (!S.session.user || S.session.user.role !== 'admin') { history.replaceState(null, '', '#/'); return screenHome() }
+  const main = h('main', { class: 'home team', id: 'main' })
+  const out = h('div', { class: 'team-out' })
+  const list = h('ul', { class: 'team-list', 'aria-label': 'Studio logins' })
+  main.append(
+    h('a', { class: 'back', href: '#/' }, icon('back'), 'All pages'),
+    h('div', { class: 'home-head' }, h('div', null, h('h1', null, 'Studio ', h('em', null, 'team')),
+      h('p', null, 'Make a login for each co-worker. You pick the email, the studio makes the password.'))),
+    out)
+
+  const email = input({ type: 'email', id: 'tm-email', placeholder: 'name@example.com', autocomplete: 'off' })
+  const role = h('select', { class: 'in', id: 'tm-role' }, h('option', { value: 'editor' }, 'Editor'), h('option', { value: 'admin' }, 'Admin'))
+  const addErr = h('p', { class: 'si-err', role: 'alert' })
+  const addBtn = h('button', { class: 'btn btn-primary', type: 'submit' }, icon('plus'), 'Create login')
+  const form = h('form', { class: 'sheet team-add' },
+    h('h2', null, 'New login'),
+    h('div', { class: 'team-add-row' },
+      h('div', { class: 'f' }, h('label', { for: 'tm-email' }, 'Email'), email),
+      h('div', { class: 'f' }, h('label', { for: 'tm-role' }, 'Role'), role),
+      addBtn),
+    h('p', { class: 'hint' }, ROLE_HINT), addErr)
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    addErr.textContent = ''
+    addBtn.disabled = true
+    const r = await api('/api/users', { method: 'POST', json: { email: email.value, role: role.value } })
+    addBtn.disabled = false
+    if (r.status === 201 && r.data) {
+      out.replaceChildren(passwordNote('Login created.', r.data.user.email, r.data.password))
+      email.value = ''
+      say('Login created. The password is on screen.')
+      return paint()
+    }
+    addErr.textContent = (r.data && r.data.error) || `The server answered ${r.status}.`
+  })
+  main.append(form, h('h2', { class: 'team-h' }, 'Logins'), list)
+  app.replaceChildren(topBar(), main)
+
+  async function act(fn) {
+    out.replaceChildren()
+    const r = await fn()
+    if (!r.ok) out.replaceChildren(h('div', { class: 'note bad', role: 'alert' }, icon('warn'), h('p', null, (r.data && r.data.error) || `The server answered ${r.status}.`)))
+    return r
+  }
+
+  async function paint() {
+    const r = await api('/api/users')
+    if (!r.ok || !r.data) {
+      list.replaceChildren(h('li', { class: 'note bad', role: 'alert' }, icon('warn'), h('p', null, (r.data && r.data.error) || `The server answered ${r.status}.`)))
+      return
+    }
+    const me = S.session.user.id
+    list.replaceChildren(...r.data.users.map((u) => {
+      const mine = u.id === me
+      const when = u.lastSignInAt ? `Last signed in ${new Date(u.lastSignInAt).toLocaleDateString()}` : 'Never signed in'
+      const roleSel = h('select', { class: 'in in-sm', 'aria-label': `Role for ${u.email}`, disabled: mine },
+        ...['editor', 'admin'].map((x) => h('option', { value: x, selected: x === u.role }, ROLE_LABEL[x])))
+      roleSel.value = u.role
+      roleSel.addEventListener('change', async () => {
+        const res = await act(() => api(`/api/users/${u.id}`, { method: 'PUT', json: { role: roleSel.value } }))
+        if (res.ok) say(`${u.email} is now ${ROLE_LABEL[roleSel.value]}`)
+        paint()
+      })
+      const reset = h('button', { class: 'btn btn-sm', type: 'button', onclick: async () => {
+        if (!confirm(`Make a new password for ${u.email}? Their old one stops working and they are signed out.`)) return
+        const res = await act(() => api(`/api/users/${u.id}/password`, { method: 'POST', json: {} }))
+        if (res.ok) {
+          if (mine) { S.session = { ...S.session, user: null }; openSignIn() }
+          out.replaceChildren(passwordNote('New password made.', u.email, res.data.password))
+        }
+      } }, 'New password')
+      const remove = mine ? null : h('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: async () => {
+        if (!confirm(`Remove ${u.email}? They are signed out and can no longer use the studio.`)) return
+        const res = await act(() => api(`/api/users/${u.id}`, { method: 'DELETE' }))
+        if (res.ok) say(`${u.email} removed`)
+        paint()
+      } }, 'Remove')
+      return h('li', { class: 'team-row' },
+        h('div', { class: 'team-who' }, h('strong', null, u.email, mine ? h('span', { class: 'you' }, 'you') : null),
+          h('span', { class: 'hint' }, u.banned ? 'Blocked in Supabase' : when)),
+        roleSel, reset, remove)
+    }))
+  }
+  await paint()
 }
 
 function failView(msg) {
@@ -2184,4 +2365,4 @@ async function save() {
   say(`Not saved. ${plural(ed.errors.length, 'problem')}.`)
 }
 
-route()
+loadSession().then((s) => (s.login && !s.user ? openSignIn() : route()))

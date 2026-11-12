@@ -210,14 +210,15 @@ A look must output each link exactly as the page rules say (href, data-kind, dat
   (any case, optional spaces before `=`), or `foreignObject`.
 - Dev server: concurrent requests share one in-flight rebuild; binds 127.0.0.1.
 
-## Studio (local dashboard, v1, no login)
+## Studio (local dashboard)
 
 `npm run studio` -> `node scripts/studio.js` -> listens on 127.0.0.1, PORT env or 4322, prints the URL.
 v2 studio changes (state fields, rename route, publish, UI): spec sections 8, 10, 11.
-Login comes later (Supabase); until then the studio only ever runs on the owner's Mac.
+The studio always runs on the owner's Mac. Login (Supabase) is in "Studio login (v4)" below.
 
 ### Module
-`src/studio/server.js` exports `createStudio({ root, site, publish })` -> an `http.Server` (not listening).
+`src/studio/server.js` exports `createStudio({ root, site, publish, auth, publicOrigin, now })` -> an `http.Server` (not listening).
+`auth` and `publicOrigin` are v4, see "Studio login (v4)". `now` (tests only): `() -> ms`, defaults to `Date.now`.
 - `root`: repo root (contains `clients/`). `site`: validated site config.
 - `publish`: `async ({ root, force }) -> { ok, output, live, backup, push }`. v2 default (`src/publish/index.js`, spec section 10):
   build to a temp dir, sync changed files to the R2 bucket, then a local git commit of `clients` and a background push as backup.
@@ -226,7 +227,7 @@ Login comes later (Supabase); until then the studio only ever runs on the owner'
 
 ### Security (every /api/* route)
 - Request must carry header `x-khybrio-studio: 1`, else 403.
-- If an `Origin` header is present it must be `http://localhost:{port}` or `http://127.0.0.1:{port}`, else 403.
+- If an `Origin` header is present it must be `http://localhost:{port}`, `http://127.0.0.1:{port}` or (v4) `publicOrigin`, else 403.
 - `:slug` in any route must match the slug regex; anything else -> 400. No path is ever built from
   unchecked input.
 - JSON bodies over 256 KB -> 413.
@@ -261,6 +262,69 @@ Login comes later (Supabase); until then the studio only ever runs on the owner'
 URL as the NFC chip. Plain GET with no studio header (an `<img>` cannot send one; the URL is public).
 404 for a bad slug, a missing client or a client.js that does not load. `?download=1` adds
 `Content-Disposition: attachment; filename="<slug>-qr.<ext>"`. Dark #0f2b29 on white, ECC M, 4-module margin.
+
+## Studio login (v4, Supabase)
+
+The studio still runs only on the owner's Mac. v4 adds accounts so a co-worker can use it through a tunnel
+(Cloudflare Tunnel, Tailscale Funnel, ngrok: the owner's choice, not part of this repo). Supabase is used for
+accounts only: pages, images and video stay in `clients/` and R2. Sessions live in the studio's memory.
+
+### Config (`.env.local`, git-ignored, values never logged or sent to the browser)
+- `SUPABASE_URL` (https), `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`: all three, or none.
+- `STUDIO_PUBLIC_ORIGIN` (optional): the tunnel's address, e.g. `https://studio.example.com`. `https:` origin, no path.
+- `scripts/studio.js`: all three Supabase keys -> login on. None -> login off, prints a warning, loopback only (v3 behaviour).
+  Some but not all -> exit 1 naming the missing keys. `STUDIO_PUBLIC_ORIGIN` without login -> exit 1 (never expose an open studio).
+- `src/publish/env.js` exports `loadStudioEnv(root) -> { auth: {url, anonKey, serviceKey} | null, missing: [names], publicOrigin: string | null, error: string | null }`.
+
+### Supabase adapter (`src/studio/supabase.js`)
+`createSupabaseAuth({ url, anonKey, serviceKey, fetch })` -> the `auth` object. Plain `fetch`, no SDK.
+- `signIn(email, password)` -> user | null. `POST {url}/auth/v1/token?grant_type=password` with `apikey: anonKey`. 400/401 -> null.
+- `getUser(id)` -> user | null (404 -> null). `listUsers()` -> users with a studio role only (pages of 200, at most 20 pages).
+- `createUser({ email, password, role })` -> user; email already registered -> throws `{ code: 'exists' }`.
+  Sets `email_confirm: true` and `app_metadata.studio_role`.
+- `setPassword(id, password)`, `setRole(id, role)` -> user. `deleteUser(id)` -> undefined.
+- Admin calls use `apikey` + `Authorization: Bearer` = serviceKey against `{url}/auth/v1/admin/users[...]`.
+- user = `{ id, email, role, createdAt, lastSignInAt, banned }`. `role` = `app_metadata.studio_role` when it is `admin`
+  or `editor`, else null. `banned` = `banned_until` is in the future. Any other non-2xx -> throws `{ code: 'upstream', status }`,
+  message never contains a key.
+
+### Server rules when `auth` is given
+- `publicOrigin` without `auth` -> `createStudio` throws. With it, `Host` may also be the public origin's host.
+- Open without a session: `GET /`, `/studio/*`, `/p/fonts/*`, `GET /api/session`, `POST /api/login`. Everything else needs a session:
+  `/api/*` -> 401 `{ error: 'Sign in first' }`; `/p/:slug/*` and `/qr/*` -> 401 text. The studio header + Origin rules still apply to every `/api/*`.
+- `POST /api/login { email, password }`: unknown email, wrong password, no studio role or banned -> 401
+  `{ error: 'Wrong email or password' }` (one message for all). Success -> 200 `{ user: {id,email,role} }` and cookie
+  `khybrio_studio=<43-char base64url>; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`, plus `; Secure` when the request came
+  through `publicOrigin` (Host is its host or `x-forwarded-proto: https`). 10 failures for one email within 15 minutes -> 429
+  `{ error: 'Too many tries. Wait 15 minutes.' }` for that email until the window passes; 100 failures overall in 15 minutes -> 429 for everyone.
+- Sessions: in memory (a restart signs everyone out), 12 hours from sign-in. Every 5 minutes of use the server re-reads the user
+  with `getUser`: gone, banned or no role -> session ended (401); role change applies. Supabase unreachable on a re-check -> 503, session kept.
+- `GET /api/session` -> `{ login: true, user: {id,email,role} | null }`; without `auth`: `{ login: false, user: null }`.
+- `POST /api/logout` -> 200 `{ ok: true }`, ends the session, clears the cookie.
+- Roles: `editor` = everything in "Routes" above (edit, upload, rename, publish). `admin` = editor + the Team routes.
+
+### Team routes (admin only; editor -> 403 `{ error: 'Admins only' }`; `:id` must be a UUID else 400)
+| Method + path | Result |
+|---|---|
+| `GET /api/users` | `{ users: [{id,email,role,createdAt,lastSignInAt,banned}] }` sorted by email |
+| `POST /api/users { email, role }` | 201 `{ user, password }`; 422 bad email / role; 409 `{ error: 'That email already has an account' }` |
+| `POST /api/users/:id/password` | 200 `{ password }` (new generated password; that user's studio sessions end) |
+| `PUT /api/users/:id { role }` | 200 `{ user }`; 422 bad role |
+| `DELETE /api/users/:id` | 200 `{ ok: true }` (that user's studio sessions end) |
+- An admin cannot change their own role or delete themselves -> 409 `{ error: 'You cannot do that to your own account' }`.
+- Generated password: 20 characters from `abcdefghjkmnpqrstuvwxyzACDEFGHJKMNPQRTUVWXYZ2346789` via `crypto.randomInt`, shown as
+  4 groups of 5 joined by `-` (23 chars). Returned once, never stored or logged by the studio.
+- Supabase errors -> 502 `{ error: 'Supabase did not answer. Try again.' }`.
+
+### First admin
+`npm run studio-admin -- <email>` (`scripts/studio-admin.js`): creates the account as `admin` with a generated password and prints it once,
+or, if the email exists, makes it `admin` and prints a new password. Needs the three Supabase keys.
+
+### UI
+- Boot: `GET /api/session`; login on and no user -> sign-in screen (email, password). Any 401 from the API -> back to sign-in.
+- Top bar: the signed-in email, `Team` (admins), `Sign out`.
+- `#/team` (admins): list of logins; add (email + role) shows the generated password once with a copy button; reset password;
+  change role; remove (with confirm). Your own row has no role change or remove.
 
 ## Hosting v2 (Cloudflare R2 + Worker)
 

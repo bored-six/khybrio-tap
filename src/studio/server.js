@@ -12,6 +12,7 @@ import { migrateRaw } from '../migrate.js'
 import { applyRename, readRedirects, writeRedirects } from '../redirects.js'
 import { PALETTES } from '../palettes.js'
 import { loadEnv } from '../publish/env.js'
+import { createLogin } from './login.js'
 import { createR2Store } from '../publish/r2.js'
 import { publishLive } from '../publish/index.js'
 import { renderPage } from '../render.js'
@@ -102,7 +103,9 @@ async function readJson(req) {
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k)
 const isFile = (p) => stat(p).then((s) => s.isFile(), () => false)
 
-export function createStudio({ root, site, publish = defaultPublish } = {}) {
+export function createStudio({ root, site, publish = defaultPublish, auth = null, publicOrigin = null, now = Date.now } = {}) {
+  if (publicOrigin && !auth) throw new Error('createStudio: publicOrigin needs auth (an open studio must never be reachable from outside)')
+  const login = auth ? createLogin({ auth, now, publicOrigin, HttpError }) : null
   const clientsDir = join(root, 'clients')
   const previewSite = { origin: 'http://localhost', base: '/p/', mainSite: site.mainSite }
 
@@ -346,10 +349,25 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
     const origin = req.headers.origin
     if (origin !== undefined) {
       const port = server.address()?.port
-      if (origin !== `http://localhost:${port}` && origin !== `http://127.0.0.1:${port}`) throw new HttpError(403, { error: 'Bad origin' })
+      if (origin !== `http://localhost:${port}` && origin !== `http://127.0.0.1:${port}` && !(publicOrigin && origin === publicOrigin)) {
+        throw new HttpError(403, { error: 'Bad origin' })
+      }
     }
     const { pathname } = url
     const m = req.method
+    if (pathname === '/api/session' && m === 'GET') {
+      return send(200, { login: !!login, user: login ? await login.current(req) : null })
+    }
+    if (login) {
+      if (pathname === '/api/login' && m === 'POST') {
+        const r = await login.signIn(req, await readJson(req))
+        return send(200, { user: r.user }, { 'set-cookie': r.setCookie })
+      }
+      if (pathname === '/api/logout' && m === 'POST') return send(200, { ok: true }, { 'set-cookie': login.signOut(req) })
+      const user = await login.current(req)
+      if (!user) throw new HttpError(401, { error: 'Sign in first' })
+      if (await login.team(req, pathname, user, readJson, send)) return
+    }
     if (pathname === '/api/state' && m === 'GET') return send(200, await state())
     if (pathname === '/api/preview' && m === 'POST') {
       const body = await readJson(req)
@@ -460,14 +478,15 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
   }
 
   const server = createServer(async (req, res) => {
-    const send = (status, obj) => {
-      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    const send = (status, obj, extra = {}) => {
+      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra })
       res.end(JSON.stringify(obj))
     }
     try {
       // DNS-rebinding guard: only answer to our own loopback names on our own port
       const port = req.socket.localPort
-      if (req.headers.host !== `localhost:${port}` && req.headers.host !== `127.0.0.1:${port}`) throw new HttpError(403, 'Forbidden host')
+      const hostOk = req.headers.host === `localhost:${port}` || req.headers.host === `127.0.0.1:${port}` || (login?.publicHost && req.headers.host === login.publicHost)
+      if (!hostOk) throw new HttpError(403, 'Forbidden host')
       const url = new URL(req.url, 'http://localhost')
       const { pathname } = url
       if (pathname.startsWith('/api/')) return await api(req, res, url, send)
@@ -480,6 +499,10 @@ export function createStudio({ root, site, publish = defaultPublish } = {}) {
           throw new HttpError(404, 'Not found')
         }
         return await serveFile(res, full)
+      }
+      // v4: client files and QR codes need a session; the UI and fonts above/below stay open so sign-in can draw.
+      if (login && (pathname.startsWith('/qr/') || (pathname.startsWith('/p/') && !pathname.startsWith('/p/fonts/')))) {
+        if (!(await login.current(req))) throw new HttpError(401, 'Sign in first')
       }
       // QR for a page's live URL (the same address the NFC chip gets). Public data, so plain GET:
       // an <img> cannot send the studio header. Only for a client whose client.js loads.
