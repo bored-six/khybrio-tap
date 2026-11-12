@@ -120,18 +120,18 @@ const ttBlock = (extra = {}) => ({
 })
 
 test('YouTube iframe: exact markup, 560x315, nocookie src', () => {
-  assert.equal(videoEmbed(ytBlock(), 'Creamy'), iframe(`https://www.youtube-nocookie.com/embed/${YT}`, 'Creamy video', 560, 315))
+  assert.equal(videoEmbed(ytBlock(), 'Sunrise'), iframe(`https://www.youtube-nocookie.com/embed/${YT}`, 'Sunrise video', 560, 315))
 })
 
 test('vertical video uses 325x578; TikTok src is the player URL', () => {
-  assert.equal(videoEmbed(ttBlock(), 'Creamy'), iframe(`https://www.tiktok.com/player/v1/${TT}`, 'Creamy video', 325, 578))
-  const shorts = videoEmbed(ytBlock({ vertical: true }), 'Creamy')
+  assert.equal(videoEmbed(ttBlock(), 'Sunrise'), iframe(`https://www.tiktok.com/player/v1/${TT}`, 'Sunrise video', 325, 578))
+  const shorts = videoEmbed(ytBlock({ vertical: true }), 'Sunrise')
   assert.match(shorts, /width="325" height="578"/)
 })
 
 test('src comes from the id, never from the user url', () => {
   const nasty = `https://www.youtube.com/watch?v=${YT}&autoplay=1&x="onload="alert(1)`
-  const html = videoEmbed(ytBlock({ url: nasty }), 'Creamy')
+  const html = videoEmbed(ytBlock({ url: nasty }), 'Sunrise')
   assert.match(html, new RegExp(`src="https://www\\.youtube-nocookie\\.com/embed/${YT}"`))
   assert.ok(!html.includes('autoplay'))
   assert.ok(!html.includes('onload'))

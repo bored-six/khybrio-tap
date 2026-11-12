@@ -18,34 +18,34 @@ test('document basics', () => {
   assert.match(html, /^<!doctype html>/i)
   assert.match(html, /<html lang="en">/)
   assert.match(html, /<meta name="viewport"/)
-  assert.match(html, /<title>Creamy Creations<\/title>/)
+  assert.match(html, /<title>Sunrise Cafe<\/title>/)
   assert.equal(meta(html, 'theme-color'), '#fff4e6')
 })
 
 test('canonical and og:url use origin + base + slug', () => {
   const a = renderPage(client(), SITE, RENDER_OPTS)
-  assert.match(a, /<link rel="canonical" href="https:\/\/tap\.khybrio\.com\/creamy-creations\/">/)
-  assert.equal(meta(a, 'og:url'), 'https://tap.khybrio.com/creamy-creations/')
+  assert.match(a, /<link rel="canonical" href="https:\/\/tap\.khybrio\.com\/sunrise-cafe\/">/)
+  assert.equal(meta(a, 'og:url'), 'https://tap.khybrio.com/sunrise-cafe/')
   const b = renderPage(client(), SITE_SUBPATH, RENDER_OPTS)
-  assert.equal(meta(b, 'og:url'), 'https://bored-six.github.io/khybrio-tap/creamy-creations/')
+  assert.equal(meta(b, 'og:url'), 'https://bored-six.github.io/khybrio-tap/sunrise-cafe/')
 })
 
 test('og:description uses the tagline, else a default built from the name', () => {
   assert.equal(meta(renderPage(client({ tagline: 'Shakes, three branches' }), SITE, RENDER_OPTS), 'og:description'), 'Shakes, three branches')
-  assert.equal(meta(renderPage(client(), SITE, RENDER_OPTS), 'og:description'), 'Creamy Creations: links, location and contact')
+  assert.equal(meta(renderPage(client(), SITE, RENDER_OPTS), 'og:description'), 'Sunrise Cafe: links, location and contact')
 })
 
 test('og:image prefers cover, then logo, absolute; omitted when neither', () => {
   const both = renderPage(client({ logo: 'logo.svg', cover: 'cover.jpg' }), SITE_SUBPATH, RENDER_OPTS)
-  assert.equal(meta(both, 'og:image'), 'https://bored-six.github.io/khybrio-tap/creamy-creations/cover.jpg')
+  assert.equal(meta(both, 'og:image'), 'https://bored-six.github.io/khybrio-tap/sunrise-cafe/cover.jpg')
   const logoOnly = renderPage(client({ logo: 'logo.svg' }), SITE, RENDER_OPTS)
-  assert.equal(meta(logoOnly, 'og:image'), 'https://tap.khybrio.com/creamy-creations/logo.svg')
+  assert.equal(meta(logoOnly, 'og:image'), 'https://tap.khybrio.com/sunrise-cafe/logo.svg')
   assert.equal(meta(renderPage(client(), SITE, RENDER_OPTS), 'og:image'), undefined)
 })
 
 test('asset() paths carry the base', () => {
   const html = renderPage(client({ logo: 'logo.svg' }), SITE_SUBPATH, RENDER_OPTS)
-  assert.match(html, /src="\/khybrio-tap\/creamy-creations\/logo\.svg"/)
+  assert.match(html, /src="\/khybrio-tap\/sunrise-cafe\/logo\.svg"/)
 })
 
 test('client strings are escaped in head and body', () => {

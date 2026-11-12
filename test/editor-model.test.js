@@ -212,7 +212,7 @@ test('matchPalette finds the preset the colours still equal (case and #abc vs #a
 })
 
 test('slugProblem knows the reserved words including api and media', () => {
-  assert.equal(slugProblem('creamy-corner'), null)
+  assert.equal(slugProblem('sunrise-corner'), null)
   assert.match(slugProblem(''), /Pick/)
   assert.match(slugProblem('A b'), /lowercase/)
   assert.match(slugProblem('x'), /2 to 40/)

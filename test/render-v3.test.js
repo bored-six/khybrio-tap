@@ -162,7 +162,7 @@ test('image markup is exactly the spec, first child of body', () => {
   const html = page({ background: IMAGE() })
   assert.match(html, /^<!doctype html><html lang="en" data-bg="image"><head>/)
   assert.ok(
-    html.includes('<body><div class="kb" aria-hidden="true"><img class="kb-m" src="/creamy-creations/photo.png" alt="" decoding="async"></div><main>'),
+    html.includes('<body><div class="kb" aria-hidden="true"><img class="kb-m" src="/sunrise-cafe/photo.png" alt="" decoding="async"></div><main>'),
     html.slice(html.indexOf('<body>'), html.indexOf('<body>') + 220),
   )
   assert.ok(!html.includes('<video'))
@@ -170,7 +170,7 @@ test('image markup is exactly the spec, first child of body', () => {
 
 test('image src follows the site base', () => {
   const html = page({ background: IMAGE() }, SITE_SUBPATH)
-  assert.ok(html.includes('<img class="kb-m" src="/khybrio-tap/creamy-creations/photo.png" alt="" decoding="async">'))
+  assert.ok(html.includes('<img class="kb-m" src="/khybrio-tap/sunrise-cafe/photo.png" alt="" decoding="async">'))
 })
 
 test('video markup is exactly the spec: poster img first, then the muted looping video', () => {
@@ -178,17 +178,17 @@ test('video markup is exactly the spec: poster img first, then the muted looping
   assert.match(html, /^<!doctype html><html lang="en" data-bg="video"><head>/)
   const want =
     '<body><div class="kb" aria-hidden="true">' +
-    '<img class="kb-m" src="/creamy-creations/poster.jpg" alt="" decoding="async">' +
-    '<video class="kb-m kb-v" autoplay muted loop playsinline disablepictureinpicture disableremoteplayback tabindex="-1" poster="/creamy-creations/poster.jpg">' +
-    '<source src="/creamy-creations/clip.mp4" type="video/mp4" media="(prefers-reduced-motion: no-preference)">' +
+    '<img class="kb-m" src="/sunrise-cafe/poster.jpg" alt="" decoding="async">' +
+    '<video class="kb-m kb-v" autoplay muted loop playsinline disablepictureinpicture disableremoteplayback tabindex="-1" poster="/sunrise-cafe/poster.jpg">' +
+    '<source src="/sunrise-cafe/clip.mp4" type="video/mp4" media="(prefers-reduced-motion: no-preference)">' +
     '</video></div><main>'
   assert.ok(html.includes(want), html.slice(html.indexOf('<body>'), html.indexOf('<body>') + 700))
 })
 
 test('video markup under a sub-path site', () => {
   const html = page({ background: VIDEO() }, SITE_SUBPATH)
-  assert.ok(html.includes('<source src="/khybrio-tap/creamy-creations/clip.mp4" type="video/mp4" media="(prefers-reduced-motion: no-preference)">'))
-  assert.ok(html.includes('poster="/khybrio-tap/creamy-creations/poster.jpg"'))
+  assert.ok(html.includes('<source src="/khybrio-tap/sunrise-cafe/clip.mp4" type="video/mp4" media="(prefers-reduced-motion: no-preference)">'))
+  assert.ok(html.includes('poster="/khybrio-tap/sunrise-cafe/poster.jpg"'))
 })
 
 test('the reduced-motion fallback rule is present for video', () => {
@@ -235,7 +235,7 @@ test('backdrop css comes after the look css', () => {
 /* ---------------------------------------------------------------- og:image */
 
 const ogImage = (html) => (html.match(/<meta property="og:image" content="([^"]*)">/) || [])[1]
-const ORIGIN = 'https://tap.khybrio.com/creamy-creations/'
+const ORIGIN = 'https://tap.khybrio.com/sunrise-cafe/'
 
 test('og:image: cover first, then logo, then the background image, then the video poster', () => {
   assert.equal(ogImage(page({ background: IMAGE() })), ORIGIN + 'cover.jpg')

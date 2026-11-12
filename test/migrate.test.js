@@ -14,13 +14,13 @@ const deepFreeze = (o) => {
 }
 
 const v1 = (extra = {}) => ({
-  slug: 'creamy-creations',
-  name: 'Creamy Creations',
+  slug: 'sunrise-cafe',
+  name: 'Sunrise Cafe',
   look: 'plain',
   theme: { bg: '#FFF4E6', ink: '#3B1F14', accent: '#E8622D' },
   links: [
     { kind: 'menu', url: 'https://example.com/menu' },
-    { kind: 'messenger', url: 'https://m.me/creamy', label: 'Message us' },
+    { kind: 'messenger', url: 'https://m.me/sunrise', label: 'Message us' },
   ],
   ...extra,
 })
@@ -30,7 +30,7 @@ test('links become link blocks in the same order, links key removed', () => {
   assert.equal('links' in out, false)
   assert.deepEqual(out.blocks, [
     { type: 'link', kind: 'menu', url: 'https://example.com/menu' },
-    { type: 'link', kind: 'messenger', url: 'https://m.me/creamy', label: 'Message us' },
+    { type: 'link', kind: 'messenger', url: 'https://m.me/sunrise', label: 'Message us' },
   ])
 })
 
@@ -51,7 +51,7 @@ test('non-object link entries are carried over as-is so validate can name them',
 
 test('other top-level keys are untouched', () => {
   const out = migrateRaw(v1({ tagline: 'hi', credit: false }))
-  assert.equal(out.slug, 'creamy-creations')
+  assert.equal(out.slug, 'sunrise-cafe')
   assert.equal(out.tagline, 'hi')
   assert.equal(out.credit, false)
   assert.deepEqual(out.theme, v1().theme)

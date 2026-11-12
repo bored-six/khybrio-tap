@@ -73,7 +73,7 @@ export const FAKE_LOOKS = {
 }
 
 export const OPTS = {
-  folder: 'creamy-creations',
+  folder: 'sunrise-cafe',
   looks: Object.keys(FAKE_LOOKS),
   fonts: Object.keys(FAKE_FONTS),
   files: ['logo.svg', 'cover.jpg'],
@@ -81,13 +81,13 @@ export const OPTS = {
 
 export function rawClient(overrides = {}) {
   return {
-    slug: 'creamy-creations',
-    name: 'Creamy Creations',
+    slug: 'sunrise-cafe',
+    name: 'Sunrise Cafe',
     look: 'plain',
     theme: { bg: '#FFF4E6', ink: '#3B1F14', accent: '#E8622D' },
     blocks: [
       { type: 'link', kind: 'menu', url: 'https://example.com/menu' },
-      { type: 'link', kind: 'messenger', url: 'https://m.me/creamy' },
+      { type: 'link', kind: 'messenger', url: 'https://m.me/sunrise' },
     ],
     ...overrides,
   }

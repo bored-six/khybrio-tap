@@ -12,7 +12,7 @@ test('a minimal valid client normalizes with defaults', () => {
   assert.equal(res.ok, true, res.errors.join('\n'))
   assert.deepEqual(res.errors, [])
   const c = res.client
-  assert.equal(c.slug, 'creamy-creations')
+  assert.equal(c.slug, 'sunrise-cafe')
   assert.equal(c.tagline, null)
   assert.deepEqual(c.font, { heading: 'fraunces', tagline: 'inter', body: 'inter' })
   assert.equal(c.logo, null)
@@ -72,7 +72,7 @@ test('slug rules', () => {
 })
 
 test('name is trimmed, required and capped', () => {
-  assert.equal(check({ name: '  Creamy  ' }).client.name, 'Creamy')
+  assert.equal(check({ name: '  Sunrise  ' }).client.name, 'Sunrise')
   assert.ok(hasError(check({ name: '   ' }), 'name'))
   assert.ok(hasError(check({ name: 'x'.repeat(61) }), 'name'))
   assert.ok(hasError(check({ tagline: 'x'.repeat(121) }), 'tagline'))
