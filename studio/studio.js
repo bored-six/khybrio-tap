@@ -754,7 +754,7 @@ async function renameTo(to) {
 /* ----- 02 name */
 function nameFields() {
   const { D } = E
-  const nameIn = input({ class: 'in name-in', value: D.name, maxlength: 60, placeholder: 'Creamy Corner', spellcheck: 'true', autocomplete: 'organization' })
+  const nameIn = input({ class: 'in name-in', value: D.name, maxlength: 60, placeholder: 'Sunrise Cafe', spellcheck: 'true', autocomplete: 'organization' })
   nameIn.addEventListener('input', () => {
     D.name = nameIn.value
     if (E.mode === 'new' && !E.slugTouched && E.els.slug && !E.els.slug.ctl.readOnly) {
